@@ -54,7 +54,7 @@ func newDetermRand(seed []byte) io.Reader {
 	//strengthen seed
 	var next = seed
 	for i := 0; i < determRandIter; i++ {
-		next, out = rollingHash(next)
+		next, out = splitHash(next)
 	}
 	return &determRand{
 		next: next,
@@ -70,14 +70,15 @@ func (d *determRand) Read(b []byte) (int, error) {
 	n := 0
 	l := len(b)
 	for n < l {
-		next, out := rollingHash(d.next)
+		next, out := splitHash(d.next)
 		n += copy(b[n:], out)
 		d.next = next
 	}
 	return n, nil
 }
 
-func rollingHash(input []byte) (next []byte, output []byte) {
+//ensures input are always hidden
+func splitHash(input []byte) (next []byte, output []byte) {
 	nextout := sha512.Sum512(input)
 	return nextout[:sha512.Size/2], nextout[sha512.Size/2:]
 }

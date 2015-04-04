@@ -7,15 +7,17 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kr/pty"
 	"golang.org/x/crypto/ssh"
 )
 
-//Server is ...
+//Server is a simple SSH Daemon
 type Server struct {
 	c  *Config
 	sc *ssh.ServerConfig
@@ -34,6 +36,7 @@ func NewServer(c *Config) (*Server, error) {
 	if exec.Command(c.Shell).Run() != nil {
 		return nil, fmt.Errorf("Failed to find shell: %s", c.Shell)
 	}
+	s.debugf("Using shell '%s'", c.Shell)
 
 	var pri ssh.Signer
 	if c.KeyFile != "" {
@@ -58,7 +61,7 @@ func NewServer(c *Config) (*Server, error) {
 			return nil, fmt.Errorf("Failed to parse private key")
 		}
 		if c.KeySeed == "" {
-			log.Printf("Key from system rand")
+			log.Printf("Key from system rng")
 		} else {
 			log.Printf("Key from seed")
 		}
@@ -77,38 +80,37 @@ func NewServer(c *Config) (*Server, error) {
 		p := pair[1]
 		sc.PasswordCallback = func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			if c.User() == u && string(pass) == p {
-				s.Debugf("User '%s' authenticated with password", u)
+				s.debugf("User '%s' authenticated with password", u)
 				return nil, nil
 			}
-			s.Debugf("Authentication failed '%s:%s'", c.User(), pass)
+			s.debugf("Authentication failed '%s:%s'", c.User(), pass)
 			return nil, fmt.Errorf("denied")
 		}
 		log.Printf("Authentication enabled (user '%s')", u)
 	} else if c.AuthType != "" {
-		//grab file
-		b, err := ioutil.ReadFile(c.AuthType)
+
+		//initial key parse
+		keys, last, err := s.parseAuth(time.Time{})
 		if err != nil {
-			return nil, fmt.Errorf("Missing auth-type")
+			return nil, err
 		}
-		lines := bytes.Split(b, []byte("\n"))
-		//parse each line
-		keys := map[string]string{}
-		for _, l := range lines {
-			if key, cmt, _, _, err := ssh.ParseAuthorizedKey(l); err != nil {
-				keys[string(key.Marshal())] = cmt
-			}
-		}
-		//ensure we got something
-		if len(keys) == 0 {
-			return nil, fmt.Errorf("No keys found in %s", c.AuthType)
-		}
+
 		//setup checker
 		sc.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+
+			//update keys
+			if ks, t, err := s.parseAuth(last); err == nil {
+				keys = ks
+				last = t
+				s.debugf("Updated authorized keys")
+			}
+
 			k := string(key.Marshal())
 			if cmt, exists := keys[k]; exists {
-				s.Debugf("User '%s' authenticated with public key %s", cmt, fingerprint(key))
+				s.debugf("User '%s' authenticated with public key %s", cmt, fingerprint(key))
 				return nil, nil
 			}
+			s.debugf("User authentication failed with public key %s", fingerprint(key))
 			return nil, fmt.Errorf("denied")
 		}
 		log.Printf("Authentication enabled (public keys #%d)", len(keys))
@@ -119,6 +121,7 @@ func NewServer(c *Config) (*Server, error) {
 	return s, nil
 }
 
+//Starts listening on port
 func (s *Server) Start() error {
 	h := s.c.Host
 	p := s.c.Port
@@ -160,7 +163,7 @@ func (s *Server) Start() error {
 			continue
 		}
 
-		s.Debugf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
+		s.debugf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
 		// Discard all global out-of-band Requests
 		go ssh.DiscardRequests(reqs)
 		// Accept all channels
@@ -183,7 +186,7 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 
 	connection, requests, err := newChannel.Accept()
 	if err != nil {
-		s.Debugf("Could not accept channel (%s)", err)
+		s.debugf("Could not accept channel (%s)", err)
 		return
 	}
 
@@ -195,13 +198,13 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 		if err != nil {
 			log.Printf("Failed to exit shell (%s)", err)
 		}
-		s.Debugf("Session closed")
+		s.debugf("Session closed")
 	}
 
 	// Allocate a terminal for this channel
 	shellf, err := pty.Start(shell)
 	if err != nil {
-		s.Debugf("Could not start pty (%s)", err)
+		s.debugf("Could not start pty (%s)", err)
 		close()
 		return
 	}
@@ -242,7 +245,36 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 	}()
 }
 
-func (s *Server) Debugf(f string, args ...interface{}) {
+func (s *Server) parseAuth(last time.Time) (map[string]string, time.Time, error) {
+
+	info, err := os.Stat(s.c.AuthType)
+	if err != nil {
+		return nil, last, fmt.Errorf("Missing auth keys file")
+	}
+
+	t := info.ModTime()
+	if t.Before(last) || t == last {
+		return nil, last, fmt.Errorf("Not updated")
+	}
+
+	//grab file
+	b, _ := ioutil.ReadFile(s.c.AuthType)
+	lines := bytes.Split(b, []byte("\n"))
+	//parse each line
+	keys := map[string]string{}
+	for _, l := range lines {
+		if key, cmt, _, _, err := ssh.ParseAuthorizedKey(l); err == nil {
+			keys[string(key.Marshal())] = cmt
+		}
+	}
+	//ensure we got something
+	if len(keys) == 0 {
+		return nil, last, fmt.Errorf("No keys found in %s", s.c.AuthType)
+	}
+	return keys, t, nil
+}
+
+func (s *Server) debugf(f string, args ...interface{}) {
 	if s.c.LogVerbose {
 		log.Printf(f, args...)
 	}

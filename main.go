@@ -6,13 +6,13 @@ import (
 	"log"
 	"os"
 
-	"github.com/jpillora/sshd/server"
+	"github.com/jpillora/sshd-lite/server"
 )
 
 var VERSION string = "0.0.0" //set via ldflags
 
 var help = `
-	Usage: sshd [options] <auth-type>
+	Usage: sshd-lite [options] <auth>
 
 	Version: ` + VERSION + `
 
@@ -21,21 +21,23 @@ var help = `
 	  --port -p, listening port (defaults to 22, then fallsback to 2200)
 	  --shell, the type of to use shell for remote sessions (defaults to bash)
 	  --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
-	  --keyseed, a string to use to seed key generation (if no key file
-	  is provided, keyseed defaults to a random seed)
+	  --keyseed, a string to use to seed key generation
 	  --version, display version
 	  -v, verbose logs
 
-	<auth-type> must be set to one of:
+	<auth> must be set to one of:
 	  1. a username and password string separated by a colon ("user:pass")
-	  2. a path to an ssh 'authorized_keys' file ("~/.ssh/authorized_keys")
-	  3. "none" to disable client authentication - very insecure
+	  2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
+	  3. "none" to disable client authentication :WARNING: very insecure
 
 	Notes:
-	  * Once authenticated, clients will have access to a shell of the
-	  current user. Currently, sshd does not lookup system users.
+	  * if no keyfile and no keyseed are set, a random RSA2048 key is used
+	  * once authenticated, clients will have access to a shell of the
+	  current user. sshd-lite does not lookup system users.
+	  * sshd-lite only supports remotes shells. tunnelling and command
+	  execution are not currently supported.
 
-	Read more: https://github.com/jpillora/sshd
+	Read more: https://github.com/jpillora/sshd-lite
 `
 
 func main() {

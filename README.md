@@ -1,6 +1,6 @@
 # sshd-lite
 
-A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). **Warning, this is beta software**.
+A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). A slightly more practical version of the SSH daemon described in this blog post http://blog.gopheracademy.com/go-and-ssh/. **Warning, this is beta software**.
 
 ### Install
 
@@ -20,6 +20,7 @@ $ go get -v github.com/jpillora/sshd-lite
 * No dependencies
 * Remote shells
 * Authentication (`user:pass` and `authorized_keys`)
+* Seed server-key generation
 
 ### Usage
 
@@ -30,7 +31,7 @@ $ sshd-lite --help
 <tmpl,code: go run main.go --help>
 ```
 
-	Usage: sshd [options] <auth-type>
+	Usage: sshd-lite [options] <auth>
 
 	Version: 0.0.0
 
@@ -39,32 +40,34 @@ $ sshd-lite --help
 	  --port -p, listening port (defaults to 22, then fallsback to 2200)
 	  --shell, the type of to use shell for remote sessions (defaults to bash)
 	  --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
-	  --keyseed, a string to use to seed key generation (if no key file
-	  is provided, keyseed defaults to a random seed)
+	  --keyseed, a string to use to seed key generation
 	  --version, display version
 	  -v, verbose logs
 
-	<auth-type> must be set to one of:
+	<auth> must be set to one of:
 	  1. a username and password string separated by a colon ("user:pass")
-	  2. a path to an ssh 'authorized_keys' file ("~/.ssh/authorized_keys")
-	  3. "none" to disable client authentication - very insecure
+	  2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
+	  3. "none" to disable client authentication :WARNING: very insecure
 
 	Notes:
-	  * Once authenticated, clients will have access to a shell of the
-	  current user. Currently, sshd-lite does not lookup system users.
-	  * sshd-lite does only supports remotes shells. no tunnelling or
-	  single-command execution.
+	  * if no keyfile and no keyseed are set, a random RSA2048 key is used
+	  * once authenticated, clients will have access to a shell of the
+	  current user. sshd-lite does not lookup system users.
+	  * sshd-lite only supports remotes shells. tunnelling and command
+	  execution are not currently supported.
 
 	Read more: https://github.com/jpillora/sshd-lite
 
 ```
 </tmpl>
 
+### Programmatic Usage
+
+[![GoDoc](https://godoc.org/github.com/jpillora/sshd-lite/server?status.svg)](https://godoc.org/github.com/jpillora/sshd-lite/server)
 
 ### Todo
 
 * Add windows support using PowerShell?
-* Automatically re-parse `auth` file
 
 #### MIT License
 
