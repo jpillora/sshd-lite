@@ -8,6 +8,8 @@ A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). A slightly
 
 See [the latest release](https://github.com/jpillora/sshd-lite/releases/latest)
 
+One-line-download `curl i.jpillora.com/sshd-lite | sh`
+
 **Source**
 
 ``` sh
@@ -21,6 +23,19 @@ $ go get -v github.com/jpillora/sshd-lite
 * Remote shells
 * Authentication (`user:pass` and `authorized_keys`)
 * Seed server-key generation
+
+### Quick use
+
+``` sh
+$ curl i.jpillora.com/sshd-lite | sh
+Downloading: sshd-lite_1.1.0_darwin_amd64
+######################################### 100.0%
+$ ./sshd-lite john:doe
+2015/04/04 22:16:36 Key from system rng
+2015/04/04 22:16:36 Fingerprint 40:af:8a:00:03:0a:9c:4b:39:ee:88:88:d3:be:35:76
+2015/04/04 22:16:36 Authentication enabled (user 'john')
+2015/04/04 22:16:36 Listening on 0.0.0.0:2200...
+```
 
 ### Usage
 
