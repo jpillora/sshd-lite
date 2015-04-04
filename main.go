@@ -1,0 +1,86 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/jpillora/sshd/server"
+)
+
+var VERSION string = "0.0.0" //set via ldflags
+
+var help = `
+	Usage: sshd [options] <auth-type>
+
+	Version: ` + VERSION + `
+
+	Options:
+	  --host, listening interface (defaults to all)
+	  --port -p, listening port (defaults to 22, then fallsback to 2200)
+	  --shell, the type of to use shell for remote sessions (defaults to bash)
+	  --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
+	  --keyseed, a string to use to seed key generation (if no key file
+	  is provided, keyseed defaults to a random seed)
+	  --version, display version
+	  -v, verbose logs
+
+	<auth-type> must be set to one of:
+	  1. a username and password string separated by a colon ("user:pass")
+	  2. a path to an ssh 'authorized_keys' file ("~/.ssh/authorized_keys")
+	  3. "none" to disable client authentication - very insecure
+
+	Notes:
+	  * Once authenticated, clients will have access to a shell of the
+	  current user. Currently, sshd does not lookup system users.
+
+	Read more: https://github.com/jpillora/sshd
+`
+
+func main() {
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, help)
+		os.Exit(1)
+	}
+
+	//init config from flags
+	c := &sshd.Config{}
+	flag.StringVar(&c.Host, "host", "0.0.0.0", "")
+	flag.StringVar(&c.Port, "p", "", "")
+	flag.StringVar(&c.Port, "port", "", "")
+	flag.StringVar(&c.Shell, "shell", "", "")
+	flag.StringVar(&c.KeyFile, "keyfile", "", "")
+	flag.StringVar(&c.KeySeed, "keyseed", "", "")
+	flag.BoolVar(&c.LogVerbose, "v", false, "")
+
+	//help/version
+	h1f := flag.Bool("h", false, "")
+	h2f := flag.Bool("help", false, "")
+	vf := flag.Bool("version", false, "")
+	flag.Parse()
+
+	if *vf {
+		fmt.Fprintf(os.Stderr, VERSION)
+		os.Exit(0)
+	}
+	if *h1f || *h2f {
+		flag.Usage()
+	}
+
+	args := flag.Args()
+	if len(args) != 1 {
+		flag.Usage()
+	}
+	c.AuthType = args[0]
+
+	s, err := sshd.NewServer(c)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = s.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
