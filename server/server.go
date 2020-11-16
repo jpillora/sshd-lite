@@ -121,7 +121,7 @@ func NewServer(c *Config) (*Server, error) {
 	return s, nil
 }
 
-//Starts listening on port
+//Start listening on port
 func (s *Server) Start() error {
 	h := s.c.Host
 	p := s.c.Port
@@ -184,11 +184,18 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 		return
 	}
 
+	s.debugf("Channel request '%s'", newChannel.ChannelType())
+	if d := newChannel.ExtraData(); len(d) > 0 {
+		s.debugf("Channel data: '%s' %x", d, d)
+	}
+
 	connection, requests, err := newChannel.Accept()
 	if err != nil {
 		s.debugf("Could not accept channel (%s)", err)
 		return
 	}
+
+	s.debugf("Channel accepted, openning %s", s.c.Shell)
 
 	shell := exec.Command(s.c.Shell)
 
@@ -240,6 +247,12 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 			case "window-change":
 				w, h := parseDims(req.Payload)
 				SetWinsize(shellf.Fd(), w, h)
+			case "env":
+				s.debugf("environment received and ignored (%x)", req.Payload)
+			case "exec":
+				s.debugf("exec attempted '%s'", req.Payload)
+			default:
+				s.debugf("unkown request: %s (reply: %v, data: %x)", req.Type, req.WantReply, req.Payload)
 			}
 		}
 	}()

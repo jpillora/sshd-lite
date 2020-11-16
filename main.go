@@ -6,15 +6,15 @@ import (
 	"log"
 	"os"
 
-	"github.com/jpillora/sshd-lite/server"
+	sshd "github.com/jpillora/sshd-lite/server"
 )
 
-var VERSION string = "0.0.0" //set via ldflags
+var version string = "0.0.0" //set via ldflags
 
 var help = `
 	Usage: sshd-lite [options] <auth>
 
-	Version: ` + VERSION + `
+	Version: ` + version + `
 
 	Options:
 	  --host, listening interface (defaults to all)
@@ -64,7 +64,7 @@ func main() {
 	flag.Parse()
 
 	if *vf {
-		fmt.Fprintf(os.Stderr, VERSION)
+		fmt.Fprintf(os.Stderr, version)
 		os.Exit(0)
 	}
 	if *h1f || *h2f {
