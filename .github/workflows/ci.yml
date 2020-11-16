@@ -22,8 +22,6 @@ jobs:
         uses: actions/checkout@v2
       - name: Build
         run: go build -v .
-      - name: Test
-        run: go test -v ./...
   # ================
   # RELEASE JOB
   #   runs after a success test
