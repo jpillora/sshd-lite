@@ -21,17 +21,14 @@ func generateKey(seed string) ([]byte, error) {
 	} else {
 		r = newDetermRand([]byte(seed))
 	}
-
 	priv, err := rsa.GenerateKey(r, 2048)
 	if err != nil {
 		return nil, err
 	}
-
 	err = priv.Validate()
 	if err != nil {
 		return nil, err
 	}
-
 	b := x509.MarshalPKCS1PrivateKey(priv)
 	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: b}), nil
 }
@@ -54,7 +51,7 @@ func newDetermRand(seed []byte) io.Reader {
 	//strengthen seed
 	var next = seed
 	for i := 0; i < determRandIter; i++ {
-		next, out = splitHash(next)
+		next, out = hash(next)
 	}
 	return &determRand{
 		next: next,
@@ -67,18 +64,21 @@ type determRand struct {
 }
 
 func (d *determRand) Read(b []byte) (int, error) {
-	n := 0
 	l := len(b)
+	//HACK: combat https://golang.org/src/crypto/rsa/rsa.go#L257
+	if l == 1 {
+		return 1, nil
+	}
+	n := 0
 	for n < l {
-		next, out := splitHash(d.next)
+		next, out := hash(d.next)
 		n += copy(b[n:], out)
 		d.next = next
 	}
 	return n, nil
 }
 
-//ensures input are always hidden
-func splitHash(input []byte) (next []byte, output []byte) {
+func hash(input []byte) (next []byte, output []byte) {
 	nextout := sha512.Sum512(input)
 	return nextout[:sha512.Size/2], nextout[sha512.Size/2:]
 }

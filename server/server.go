@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kr/pty"
+	"github.com/creack/pty"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -32,39 +32,39 @@ func NewServer(c *Config) (*Server, error) {
 	if c.Shell == "" {
 		c.Shell = "bash"
 	}
-
-	if exec.Command(c.Shell).Run() != nil {
+	p, err := exec.LookPath(c.Shell)
+	if err != nil {
 		return nil, fmt.Errorf("Failed to find shell: %s", c.Shell)
 	}
-	s.debugf("Using shell '%s'", c.Shell)
+	c.Shell = p
+	s.debugf("Session shell %s", c.Shell)
 
-	var pri ssh.Signer
+	var key []byte
 	if c.KeyFile != "" {
 		//user provided key (can generate with 'ssh-keygen -t rsa')
 		b, err := ioutil.ReadFile(c.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to load keyfile")
 		}
-		pri, err = ssh.ParsePrivateKey(b)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to parse private key")
-		}
-		log.Printf("Key from file %s", c.KeyFile)
+		key = b
 	} else {
 		//generate key now
 		b, err := generateKey(c.KeySeed)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to generate private key")
 		}
-		pri, err = ssh.ParsePrivateKey(b)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to parse private key")
-		}
-		if c.KeySeed == "" {
-			log.Printf("Key from system rng")
-		} else {
-			log.Printf("Key from seed")
-		}
+		key = b
+	}
+	pri, err := ssh.ParsePrivateKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to parse private key")
+	}
+	if c.KeyFile != "" {
+		log.Printf("Key from file %s", c.KeyFile)
+	} else if c.KeySeed == "" {
+		log.Printf("Key from system rng")
+	} else {
+		log.Printf("Key from seed")
 	}
 
 	sc.AddHostKey(pri)
@@ -88,23 +88,19 @@ func NewServer(c *Config) (*Server, error) {
 		}
 		log.Printf("Authentication enabled (user '%s')", u)
 	} else if c.AuthType != "" {
-
 		//initial key parse
 		keys, last, err := s.parseAuth(time.Time{})
 		if err != nil {
 			return nil, err
 		}
-
 		//setup checker
 		sc.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-
 			//update keys
 			if ks, t, err := s.parseAuth(last); err == nil {
 				keys = ks
 				last = t
 				s.debugf("Updated authorized keys")
 			}
-
 			k := string(key.Marshal())
 			if cmt, exists := keys[k]; exists {
 				s.debugf("User '%s' authenticated with public key %s", cmt, fingerprint(key))
@@ -117,7 +113,6 @@ func NewServer(c *Config) (*Server, error) {
 	} else {
 		return nil, fmt.Errorf("Missing auth-type")
 	}
-
 	return s, nil
 }
 
@@ -196,18 +191,17 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 	}
 
 	s.debugf("Channel accepted, openning %s", s.c.Shell)
-
 	shell := exec.Command(s.c.Shell)
 
 	close := func() {
 		connection.Close()
-		_, err := shell.Process.Wait()
-		if err != nil {
-			log.Printf("Failed to exit shell (%s)", err)
+		if shell.Process != nil {
+			if _, err := shell.Process.Wait(); err != nil {
+				log.Printf("Failed to exit shell (%s)", err)
+			}
 		}
 		s.debugf("Session closed")
 	}
-
 	// Allocate a terminal for this channel
 	shellf, err := pty.Start(shell)
 	if err != nil {
@@ -248,7 +242,10 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 				w, h := parseDims(req.Payload)
 				SetWinsize(shellf.Fd(), w, h)
 			case "env":
-				s.debugf("environment received and ignored (%x)", req.Payload)
+				type env struct{ Name, Value string }
+				e := env{}
+				ssh.Unmarshal(req.Payload, &e)
+				s.debugf("environment received and ignored: %s=%s", e.Name, e.Value)
 			case "exec":
 				s.debugf("exec attempted '%s'", req.Payload)
 			default:
