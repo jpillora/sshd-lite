@@ -1,13 +1,13 @@
 package sshd
 
 import (
-	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
-	"fmt"
 	"io"
 	"strings"
 
@@ -34,12 +34,12 @@ func generateKey(seed string) ([]byte, error) {
 }
 
 func fingerprint(k ssh.PublicKey) string {
-	bytes := md5.Sum(k.Marshal())
-	strbytes := make([]string, len(bytes))
-	for i, b := range bytes {
-		strbytes[i] = fmt.Sprintf("%02x", b)
+	bytes := sha256.Sum256(k.Marshal())
+	b64 := base64.StdEncoding.EncodeToString(bytes[:])
+	if strings.HasSuffix(b64, "=") {
+		b64 = strings.TrimSuffix(b64, "=") + "."
 	}
-	return strings.Join(strbytes, ":")
+	return "SHA256:" + b64
 }
 
 //========

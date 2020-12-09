@@ -68,7 +68,7 @@ func NewServer(c *Config) (*Server, error) {
 	}
 
 	sc.AddHostKey(pri)
-	log.Printf("Fingerprint %s", fingerprint(pri.PublicKey()))
+	log.Printf("RSA key fingerprint is %s", fingerprint(pri.PublicKey()))
 
 	//setup auth
 	if c.AuthType == "none" {
@@ -189,9 +189,57 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 		s.debugf("Could not accept channel (%s)", err)
 		return
 	}
+	s.debugf("Channel accepted")
+	go s.handleRequests(connection, requests)
+}
 
-	s.debugf("Channel accepted, openning %s", s.c.Shell)
+func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Request) {
+	env := os.Environ()
+	resizes := make(chan []byte, 10)
+	defer close(resizes)
+	// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
+	for req := range requests {
+		switch req.Type {
+		case "pty-req":
+			termLen := req.Payload[3]
+			resizes <- req.Payload[termLen+4:]
+			// Responding true (OK) here will let the client
+			// know we have a pty ready
+			s.debugf("pty ready")
+			req.Reply(true, nil)
+		case "window-change":
+			resizes <- req.Payload
+		case "env":
+			e := struct{ Name, Value string }{}
+			ssh.Unmarshal(req.Payload, &e)
+			kv := e.Name + "=" + e.Value
+			s.debugf("env: %s", kv)
+			if !s.c.IgnoreEnv {
+				env = append(env, kv)
+			}
+		case "shell":
+			// Responding true (OK) here will let the client
+			// know we have attached the shell (pty) to the connection
+			if len(req.Payload) > 0 {
+				s.debugf("shell command ignored '%s'", req.Payload)
+			}
+			err := s.attachShell(connection, env, resizes)
+			if err != nil {
+				s.debugf("exec shell: %s", err)
+			}
+			req.Reply(err == nil, nil)
+		case "exec":
+			s.debugf("exec ignored '%s'", req.Payload)
+		default:
+			s.debugf("unkown request: %s (reply: %v, data: %x)", req.Type, req.WantReply, req.Payload)
+		}
+	}
+}
+
+func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-chan []byte) error {
+
 	shell := exec.Command(s.c.Shell)
+	shell.Env = env
 
 	close := func() {
 		connection.Close()
@@ -202,14 +250,19 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 		}
 		s.debugf("Session closed")
 	}
-	// Allocate a terminal for this channel
+	//start a shell for this channel's connection
 	shellf, err := pty.Start(shell)
 	if err != nil {
-		s.debugf("Could not start pty (%s)", err)
 		close()
-		return
+		return fmt.Errorf("Could not start pty (%s)", err)
 	}
-
+	//dequeue resizes
+	go func() {
+		for payload := range resizes {
+			w, h := parseDims(payload)
+			SetWinsize(shellf.Fd(), w, h)
+		}
+	}()
 	//pipe session to shell and visa-versa
 	var once sync.Once
 	go func() {
@@ -220,39 +273,9 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 		io.Copy(shellf, connection)
 		once.Do(close)
 	}()
-
-	// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
-	go func() {
-		for req := range requests {
-			switch req.Type {
-			case "shell":
-				// We only accept the default shell
-				// (i.e. no command in the Payload)
-				if len(req.Payload) == 0 {
-					req.Reply(true, nil)
-				}
-			case "pty-req":
-				termLen := req.Payload[3]
-				w, h := parseDims(req.Payload[termLen+4:])
-				SetWinsize(shellf.Fd(), w, h)
-				// Responding true (OK) here will let the client
-				// know we have a pty ready for input
-				req.Reply(true, nil)
-			case "window-change":
-				w, h := parseDims(req.Payload)
-				SetWinsize(shellf.Fd(), w, h)
-			case "env":
-				type env struct{ Name, Value string }
-				e := env{}
-				ssh.Unmarshal(req.Payload, &e)
-				s.debugf("environment received and ignored: %s=%s", e.Name, e.Value)
-			case "exec":
-				s.debugf("exec attempted '%s'", req.Payload)
-			default:
-				s.debugf("unkown request: %s (reply: %v, data: %x)", req.Type, req.WantReply, req.Payload)
-			}
-		}
-	}()
+	//
+	s.debugf("shell attached")
+	return nil
 }
 
 func (s *Server) parseAuth(last time.Time) (map[string]string, time.Time, error) {

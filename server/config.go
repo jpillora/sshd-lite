@@ -8,6 +8,7 @@ type Config struct {
 	KeyFile    string
 	KeySeed    string
 	AuthType   string
+	IgnoreEnv  bool
 	LogVerbose bool
 }
 

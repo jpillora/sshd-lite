@@ -8,7 +8,7 @@ A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). A slightly
 
 See [the latest release](https://github.com/jpillora/sshd-lite/releases/latest)
 
-One-line-download `curl i.jpillora.com/sshd-lite | sh`
+One-line-download and install `curl https://i.jpillora.com/sshd-lite! | sh`
 
 **Source**
 
@@ -26,15 +26,29 @@ $ go get -v github.com/jpillora/sshd-lite
 
 ### Quick use
 
+Server
+
 ``` sh
-$ curl i.jpillora.com/sshd-lite | sh
+$ curl https://i.jpillora.com/sshd-lite! | sh
 Downloading: sshd-lite_1.1.0_darwin_amd64
 ######################################### 100.0%
-$ ./sshd-lite john:doe
-2015/04/04 22:16:36 Key from system rng
-2015/04/04 22:16:36 Fingerprint 40:af:8a:00:03:0a:9c:4b:39:ee:88:88:d3:be:35:76
-2015/04/04 22:16:36 Authentication enabled (user 'john')
-2015/04/04 22:16:36 Listening on 0.0.0.0:2200...
+$ sshd-lite john:doe
+2020/12/09 23:55:08 Key from system rng
+2020/12/09 23:55:08 RSA key fingerprint is SHA256:kLK6RD2tCqSfvYxdMPa3YRNwUJS09njfE1hXoqOYXG4.
+2020/12/09 23:55:08 Authentication enabled (user 'john')
+2020/12/09 23:55:08 Listening on 0.0.0.0:2200...
+```
+
+Client
+
+```sh
+$ ssh john@localhost -p 2200
+The authenticity of host '[localhost]:2200 ([::1]:2200)' can't be established.
+RSA key fingerprint is SHA256:kLK6RD2tCqSfvYxdMPa3YRNwUJS09njfE1hXoqOYXG4.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+john@localhost's password: ***
+bash-3.2$ date
+Wed  9 Dec 2020 23:57:22 AEDT
 ```
 
 ### Usage
@@ -43,38 +57,40 @@ $ ./sshd-lite john:doe
 $ sshd-lite --help
 ```
 
-<tmpl,code: go run main.go --help>
+<!--tmpl,code=plain:echo "$ sshd-lite --help" && go run main.go --help | sed 's#0.0.0-src#X.Y.Z#' -->
+``` plain 
+$ sshd-lite --help
+exit status 1
+
+  Usage: sshd-lite [options] <auth>
+
+  Version: X.Y.Z
+
+  Options:
+    --host, listening interface (defaults to all)
+    --port -p, listening port (defaults to 22, then fallsback to 2200)
+    --shell, the type of to use shell for remote sessions (defaults to bash)
+    --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
+    --keyseed, a string to use to seed key generation
+    --noenv, ignore environment variables provided by the client
+    --version, display version
+    -v, verbose logs
+
+  <auth> must be set to one of:
+    1. a username and password string separated by a colon ("user:pass")
+    2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
+    3. "none" to disable client authentication :WARNING: very insecure
+
+  Notes:
+    * if no keyfile and no keyseed are set, a random RSA2048 key is used
+    * once authenticated, clients will login to a shell as the
+    sshd-lite user. sshd-lite does not lookup system users.
+    * sshd-lite only supports remotes shells. tunnelling and command
+    execution are not currently supported.
+
+  Read more: https://github.com/jpillora/sshd-lite
 ```
-
-	Usage: sshd-lite [options] <auth>
-
-	Version: 0.0.0
-
-	Options:
-	  --host, listening interface (defaults to all)
-	  --port -p, listening port (defaults to 22, then fallsback to 2200)
-	  --shell, the type of to use shell for remote sessions (defaults to bash)
-	  --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
-	  --keyseed, a string to use to seed key generation
-	  --version, display version
-	  -v, verbose logs
-
-	<auth> must be set to one of:
-	  1. a username and password string separated by a colon ("user:pass")
-	  2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
-	  3. "none" to disable client authentication :WARNING: very insecure
-
-	Notes:
-	  * if no keyfile and no keyseed are set, a random RSA2048 key is used
-	  * once authenticated, clients will have access to a shell of the
-	  current user. sshd-lite does not lookup system users.
-	  * sshd-lite only supports remotes shells. tunnelling and command
-	  execution are not currently supported.
-
-	Read more: https://github.com/jpillora/sshd-lite
-
-```
-</tmpl>
+<!--/tmpl-->
 
 ### Programmatic Usage
 
@@ -86,7 +102,7 @@ $ sshd-lite --help
 
 #### MIT License
 
-Copyright © 2015 Jaime Pillora &lt;dev@jpillora.com&gt;
+Copyright © 2020 Jaime Pillora &lt;dev@jpillora.com&gt;
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the

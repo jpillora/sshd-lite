@@ -9,41 +9,43 @@ import (
 	sshd "github.com/jpillora/sshd-lite/server"
 )
 
-var version string = "0.0.0" //set via ldflags
+var version string = "0.0.0-src" //set via ldflags
 
 var help = `
-	Usage: sshd-lite [options] <auth>
+  Usage: sshd-lite [options] <auth>
 
-	Version: ` + version + `
+  Version: ` + version + `
 
-	Options:
-	  --host, listening interface (defaults to all)
-	  --port -p, listening port (defaults to 22, then fallsback to 2200)
-	  --shell, the type of to use shell for remote sessions (defaults to bash)
-	  --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
-	  --keyseed, a string to use to seed key generation
-	  --version, display version
-	  -v, verbose logs
+  Options:
+    --host, listening interface (defaults to all)
+    --port -p, listening port (defaults to 22, then fallsback to 2200)
+    --shell, the type of to use shell for remote sessions (defaults to bash)
+    --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
+    --keyseed, a string to use to seed key generation
+    --noenv, ignore environment variables provided by the client
+    --version, display version
+    -v, verbose logs
 
-	<auth> must be set to one of:
-	  1. a username and password string separated by a colon ("user:pass")
-	  2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
-	  3. "none" to disable client authentication :WARNING: very insecure
+  <auth> must be set to one of:
+    1. a username and password string separated by a colon ("user:pass")
+    2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
+    3. "none" to disable client authentication :WARNING: very insecure
 
-	Notes:
-	  * if no keyfile and no keyseed are set, a random RSA2048 key is used
-	  * once authenticated, clients will have access to a shell of the
-	  current user. sshd-lite does not lookup system users.
-	  * sshd-lite only supports remotes shells. tunnelling and command
-	  execution are not currently supported.
+  Notes:
+    * if no keyfile and no keyseed are set, a random RSA2048 key is used
+    * once authenticated, clients will have access to a shell of the
+    current user. sshd-lite does not lookup system users.
+    * sshd-lite only supports remotes shells. tunnelling and command
+    execution are not currently supported.
 
-	Read more: https://github.com/jpillora/sshd-lite
+  Read more: https://github.com/jpillora/sshd-lite
+
 `
 
 func main() {
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, help)
+		fmt.Print(help)
 		os.Exit(1)
 	}
 
@@ -55,6 +57,7 @@ func main() {
 	flag.StringVar(&c.Shell, "shell", "", "")
 	flag.StringVar(&c.KeyFile, "keyfile", "", "")
 	flag.StringVar(&c.KeySeed, "keyseed", "", "")
+	flag.BoolVar(&c.IgnoreEnv, "noenv", false, "")
 	flag.BoolVar(&c.LogVerbose, "v", false, "")
 
 	//help/version
@@ -64,7 +67,7 @@ func main() {
 	flag.Parse()
 
 	if *vf {
-		fmt.Fprintf(os.Stderr, version)
+		fmt.Print(version)
 		os.Exit(0)
 	}
 	if *h1f || *h2f {
