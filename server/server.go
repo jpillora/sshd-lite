@@ -215,7 +215,7 @@ func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Req
 			kv := e.Name + "=" + e.Value
 			s.debugf("env: %s", kv)
 			if !s.c.IgnoreEnv {
-				env = append(env, kv)
+				env = appendEnv(env, kv)
 			}
 		case "shell":
 			// Responding true (OK) here will let the client
@@ -240,6 +240,7 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 
 	shell := exec.Command(s.c.Shell)
 	shell.Env = env
+	s.debugf("Session env: %v", env)
 
 	close := func() {
 		connection.Close()
@@ -311,4 +312,16 @@ func (s *Server) debugf(f string, args ...interface{}) {
 	if s.c.LogVerbose {
 		log.Printf(f, args...)
 	}
+}
+
+func appendEnv(env []string, kv string) []string {
+	p := strings.SplitN(kv, "=", 2)
+	k := p[0] + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, k) {
+			env[i] = kv
+			return env
+		}
+	}
+	return append(env, kv)
 }
