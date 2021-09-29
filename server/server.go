@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/creack/pty"
+	"github.com/jpillora/sshd-lite/pty"
 	"golang.org/x/crypto/ssh"
 )
 

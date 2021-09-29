@@ -1,32 +1,35 @@
-# 
-# WARNING
-# THIS MAKEFILE CAN ONLY BE USED TO GENERATE A VERSION OF SSHD-LITE
-# THAT IS BASED ON A PENDING PULL REQUEST OF THE PTY PROJECT
-#
-BUILD_VARS=-s -w
-TRIM_FLAGS=-gcflags "all=-trimpath=${PWD}" -asmflags "all=-trimpath=${PWD}"
+.PHONY: default all dep publish clean linux64 linuxarm64 darwin64 darwinarm64 win64
 
-pty/go.mod:
-	git clone https://github.com/jeffreystoke/pty.git
+default:
+	@$$GOPATH/bin/goreleaser build --snapshot --rm-dist --single-target
 
-all: linux64 linuxarm64 darwin64 darwinarm64 win64
+all: dep
+	@$$GOPATH/bin/goreleaser build --snapshot --rm-dist
 
-linux: linux64
+dep:
+	@go install github.com/goreleaser/goreleaser@latest
+	@go get -v -d ./...
+	@go get -u all
+	@go mod tidy
+	@go fmt
 
-linux64: pty/go.mod
-	GOOS=linux GOARCH=amd64 go build ${TRIM_FLAGS} -ldflags "${BUILD_VARS}" -o bin/sshd-lite && cd bin && sha256sum sshd-lite > sshd-lite.sha256
+publish: dep
+	@$$GOPATH/bin/goreleaser release --snapshot --skip-publish --rm-dist
 
-linuxarm64: pty/go.mod
-	GOOS=linux GOARCH=arm64 go build ${TRIM_FLAGS} -ldflags "${BUILD_VARS}" -o bin/sshd-lite-arm64  && cd bin && sha256sum sshd-lite-arm64 > sshd-lite-arm64.sha256
+clean:
+	@rm -rf dist
 
-darwin64: pty/go.mod
-	GOOS=darwin GOARCH=amd64 go build ${TRIM_FLAGS} -ldflags "${BUILD_VARS}" -o bin/sshd-lite-darwin && cd bin && sha256sum sshd-lite-darwin > sshd-lite-darwin.sha256
+linux64:
+	@GOOS=linux GOARCH=amd64 $$GOPATH/bin/goreleaser build --snapshot --rm-dist --single-target
 
-darwinarm64: pty/go.mod
-	GOOS=darwin GOARCH=arm64 go build ${TRIM_FLAGS} -ldflags "${BUILD_VARS}" -o bin/sshd-lite-darwin-arm64 && cd bin && sha256sum sshd-lite-darwin-arm64 > sshd-lite-darwin-arm64.sha256
+linuxarm64:
+	@GOOS=linux GOARCH=arm64 $$GOPATH/bin/goreleaser build --snapshot --rm-dist --single-target
 
-win64: pty/go.mod
-	GOOS=windows GOARCH=amd64 go build ${TRIM_FLAGS} -ldflags "${BUILD_VARS}" -o bin/sshd-lite.exe && cd bin && sha256sum sshd-lite.exe > sshd-lite-win64.sha256
+darwin64:
+	@GOOS=darwin GOARCH=amd64 $$GOPATH/bin/goreleaser build --snapshot --rm-dist --single-target
 
-verify:
-	cd bin && sha256sum *.sha256 -c && cd ../;
+darwinarm64:
+	@GOOS=darwin GOARCH=arm64 $$GOPATH/bin/goreleaser build --snapshot --rm-dist --single-target
+
+win64: 
+	@GOOS=windows GOARCH=amd64 $$GOPATH/bin/goreleaser build --snapshot --rm-dist --single-target

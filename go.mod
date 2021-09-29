@@ -2,9 +2,8 @@ module github.com/jpillora/sshd-lite
 
 go 1.15
 
-replace github.com/creack/pty => ./pty
-
 require (
-	github.com/creack/pty v1.1.11
-	golang.org/x/crypto v0.0.0-20201116153603-4be66e5b6582
+	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+	golang.org/x/sys v0.0.0-20210927094055-39ccf1dd6fa6 // indirect
+	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 )
