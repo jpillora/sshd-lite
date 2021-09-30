@@ -250,7 +250,7 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 	close := func() {
 		connection.Close()
 		if shell.Process != nil {
-			if _, err := shell.Process.Wait(); err != nil {
+			if ps, err := shell.Process.Wait(); err != nil && ps != nil {
 				log.Printf("Failed to exit shell (%s)", err)
 			}
 		}
@@ -281,6 +281,20 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 	}()
 	//
 	s.debugf("shell attached")
+	go func() {
+		// Start proactively listening for process death, for those ptys that
+		// don't signal on EOF.
+		if shell.Process != nil {
+			if ps, err := shell.Process.Wait(); err != nil && ps != nil {
+				log.Printf("Failed to exit shell (%s)", err)
+			}
+			// It appears that closing the pty is an idempotent operation
+			// therefore making this call ensures that the other two coroutines
+			// will fall through and exit, and there is no downside.
+			shellf.Close()
+		}
+		s.debugf("Shell terminated and Session closed")
+	}()
 	return nil
 }
 
