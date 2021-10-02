@@ -1,10 +1,9 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
+# Notes:
+# In order to publish to github, we need a GitHub token.
+# This token should be in ~/.config/goreleaser/github_token
 before:
   hooks:
-    # You may remove this if you don't use go modules.
     - go mod tidy
-    # you may remove this if you don't need go generate
     - go generate ./...
 builds:
   - env:
@@ -29,8 +28,21 @@ checksum:
 snapshot:
   name_template: "{{ incpatch .Version }}-next"
 changelog:
+  skip: false
   sort: asc
   filters:
     exclude:
       - '^docs:'
       - '^test:'
+# where to publish
+release:
+  github:
+    owner: fusion
+    name: sshd-lite
+  header: |
+    ## Release {{ .Tag }} on {{ .Date }}
+    
+  # auto-publish?
+  draft: false
+  # mark as production ready?
+  prerelease: false
