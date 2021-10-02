@@ -3,7 +3,7 @@ package sshd
 import (
 	"encoding/binary"
 
-	"github.com/jpillora/sshd-lite/pty"
+	"github.com/creack/pty"
 )
 
 // parseDims extracts terminal dimensions (width x height) from the provided buffer.
