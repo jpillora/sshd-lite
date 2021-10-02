@@ -1,6 +1,7 @@
 # Notes:
 # In order to publish to github, we need a GitHub token.
 # This token should be in ~/.config/goreleaser/github_token
+# Then, to release, ensure that the released commit is tagged.
 before:
   hooks:
     - go mod tidy
@@ -37,7 +38,7 @@ changelog:
 # where to publish
 release:
   github:
-    owner: fusion
+    owner: jpillora
     name: sshd-lite
   header: |
     ## Release {{ .Tag }} on {{ .Date }}

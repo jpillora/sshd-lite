@@ -14,7 +14,7 @@ dep:
 	@go fmt
 
 publish: dep
-	@$$GOPATH/bin/goreleaser release --snapshot --skip-publish --rm-dist
+	@$$GOPATH/bin/goreleaser release --rm-dist
 
 clean:
 	@rm -rf dist
