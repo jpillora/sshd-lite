@@ -19,7 +19,7 @@ var help = `
   Options:
     --host, listening interface (defaults to all)
     --port -p, listening port (defaults to 22, then fallsback to 2200)
-    --shell, the type of to use shell for remote sessions (defaults to bash)
+    --shell, the type of to use shell for remote sessions (defaults to $SHELL, then bash/powershell)
     --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
     --keyseed, a string to use to seed key generation
     --noenv, ignore environment variables provided by the client
@@ -54,7 +54,7 @@ func main() {
 	flag.StringVar(&c.Host, "host", "0.0.0.0", "")
 	flag.StringVar(&c.Port, "p", "", "")
 	flag.StringVar(&c.Port, "port", "", "")
-	flag.StringVar(&c.Shell, "shell", "", "")
+	flag.StringVar(&c.Shell, "shell", os.Getenv("SHELL"), "")
 	flag.StringVar(&c.KeyFile, "keyfile", "", "")
 	flag.StringVar(&c.KeySeed, "keyseed", "", "")
 	flag.BoolVar(&c.IgnoreEnv, "noenv", false, "")

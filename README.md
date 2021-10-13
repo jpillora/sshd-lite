@@ -18,9 +18,8 @@ $ go get -v github.com/jpillora/sshd-lite
 
 ### Features
 
-* Cross platform single binary
-* No dependencies
-* Remote shells
+* Cross platform binaries with no dependencies
+* Remote shells (`bash` in linux/mac and `powershell` in windows)
 * Authentication (`user:pass` and `authorized_keys`)
 * Seed server-key generation
 
@@ -45,8 +44,8 @@ Client
 $ ssh john@localhost -p 2200
 The authenticity of host '[localhost]:2200 ([::1]:2200)' can't be established.
 RSA key fingerprint is SHA256:kLK6RD2tCqSfvYxdMPa3YRNwUJS09njfE1hXoqOYXG4.
-Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
-john@localhost's password: ***
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes # note fingerprint matches
+john@localhost's password: *** # enter password from above
 bash-3.2$ date
 Wed  9 Dec 2020 23:57:22 AEDT
 ```
@@ -69,7 +68,7 @@ exit status 1
   Options:
     --host, listening interface (defaults to all)
     --port -p, listening port (defaults to 22, then fallsback to 2200)
-    --shell, the type of to use shell for remote sessions (defaults to bash)
+    --shell, the type of to use shell for remote sessions (defaults to $SHELL, then bash/powershell)
     --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
     --keyseed, a string to use to seed key generation
     --noenv, ignore environment variables provided by the client
@@ -95,10 +94,6 @@ exit status 1
 ### Programmatic Usage
 
 [![GoDoc](https://godoc.org/github.com/jpillora/sshd-lite/server?status.svg)](https://godoc.org/github.com/jpillora/sshd-lite/server)
-
-### Todo
-
-* Add windows support using PowerShell?
 
 #### MIT License
 
