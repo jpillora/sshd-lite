@@ -12,12 +12,12 @@ Inspired by https://github.com/regit/pshitt but I want to play with Go.
 
 to build:
 
-go build
+    go build
 
 create RSA keyfile (to avoid regenerating each time during testing) with
 
-rsa_keygen -t
+    ssh-keygen -t rsa
 
 to run:
 
-./gosshpot -p 2022 -v --keyfile id_rsa a:b 2> password.list
+    ./gosshpot -p 2022 -v --keyfile id_rsa a:b 2> password.list
