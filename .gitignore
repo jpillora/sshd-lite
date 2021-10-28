@@ -32,3 +32,5 @@ id_rsa
 password.list
 password.lst
 *.log
+
+gosshpot
