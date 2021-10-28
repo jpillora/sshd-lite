@@ -50,7 +50,7 @@ func main() {
 	}
 
 	//init config from flags
-	c := &sshd.Config{}
+	c := &gosshpot.Config{}
 	flag.StringVar(&c.Host, "host", "0.0.0.0", "")
 	flag.StringVar(&c.Port, "p", "", "")
 	flag.StringVar(&c.Port, "port", "", "")
@@ -80,7 +80,7 @@ func main() {
 	}
 	c.AuthType = args[0]
 
-	s, err := sshd.NewServer(c)
+	s, err := gosshpot.NewServer(c)
 	if err != nil {
 		log.Fatal(err)
 	}

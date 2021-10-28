@@ -24,3 +24,11 @@ _testmain.go
 *.prof
 
 dist/
+
+# don't send server keyfile
+id_rsa
+
+# don't send logfiles
+password.list
+password.lst
+*.log
