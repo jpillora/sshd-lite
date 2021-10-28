@@ -20,4 +20,4 @@ create RSA keyfile (to avoid regenerating each time during testing) with
 
 to run:
 
-    ./gosshpot -p 2022 -v --keyfile id_rsa a:b 2> password.list
+    ./gosshpot -p 2022 -v --keyfile id_rsa 2> password.list
