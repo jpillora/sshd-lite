@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	sshd "github.com/jpillora/sshd-lite/server"
+	gosshpot "github.com/gbroiles/gosshpot/server"
 )
 
 var version string = "0.0.0-src" //set via ldflags

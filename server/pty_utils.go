@@ -1,4 +1,4 @@
-package sshd
+package gosshpot
 
 import (
 	"encoding/binary"

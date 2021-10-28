@@ -1,4 +1,4 @@
-package sshd
+package gosshpot
 
 //Config is ...
 type Config struct {
