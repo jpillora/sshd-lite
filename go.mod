@@ -1,4 +1,4 @@
-module github.com/jpillora/sshd-lite
+module github.com/gbroiles/gosshpot
 
 go 1.15
 
