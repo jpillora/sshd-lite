@@ -16,12 +16,21 @@ type Server struct {
 	sc *ssh.ServerConfig
 }
 
+func ServerString(s string) (string) {
+	return s
+}
+
+
+
 
 //NewServer creates a new Server
 func NewServer(c *Config) (*Server, error) {
 
 	sc := &ssh.ServerConfig{}
-	sc.MaxAuthTries = 1
+	sc.MaxAuthTries = 3
+	sc.BannerCallback = func(c ssh.ConnMetadata) (string) {
+		return "I got 99 problems but buffer overflows aint one\n" }
+
 	s := &Server{c: c, sc: sc}
 
 	var key []byte
@@ -55,7 +64,7 @@ func NewServer(c *Config) (*Server, error) {
 	sc.AddHostKey(pri)
 
 		sc.PasswordCallback = func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			s.debugf("Attempt %s:%s:%s", c.RemoteAddr(),c.User(), pass)
+			s.debugf("Attempt %s:%s:%s:%s", c.RemoteAddr(),c.User(), pass, c.ClientVersion())
 			return nil, fmt.Errorf("denied")
 		}
 	return s, nil
