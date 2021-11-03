@@ -6,7 +6,7 @@ Essentially created by stripping off parts of https://github.com/jpillora/sshd-l
 
 I am very new to Go, so usage is very much at your own risk.
 
-I am building on x64 Linux, I have no idea if it will work on other platforms.
+Built on x64 Linux. Won't work on Windows because golang stdlib syslog doesn't support Windows. 
 
 Inspired by https://github.com/regit/pshitt but I want to play with Go. 
 
@@ -20,4 +20,6 @@ create RSA keyfile (to avoid regenerating each time during testing) with
 
 to run:
 
-    ./gosshpot -p 2022 -v --keyfile id_rsa 2> password.list
+    ./gosshpot -p 2022 -v --keyfile id_rsa 
+
+

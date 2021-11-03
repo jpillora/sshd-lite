@@ -10,6 +10,7 @@ type Config struct {
 	AuthType   string
 	IgnoreEnv  bool
 	LogVerbose bool
+	MaxAuthTries int
 }
 
 //NewConfig creates a new Config

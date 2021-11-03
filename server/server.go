@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
-	"os/exec"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -17,18 +16,13 @@ type Server struct {
 	sc *ssh.ServerConfig
 }
 
+
 //NewServer creates a new Server
 func NewServer(c *Config) (*Server, error) {
 
 	sc := &ssh.ServerConfig{}
+	sc.MaxAuthTries = 1
 	s := &Server{c: c, sc: sc}
-
-	c.Shell = "/usr/sbin/nologin"
-	p, err := exec.LookPath(c.Shell)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to find shell: %s", c.Shell)
-	}
-	c.Shell = p
 
 	var key []byte
 	if c.KeyFile != "" {

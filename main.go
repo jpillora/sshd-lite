@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"log/syslog"
 
 	gosshpot "github.com/gbroiles/gosshpot/server"
 )
@@ -34,6 +35,13 @@ var help = `
 `
 
 func main() {
+
+    syslogger, err := syslog.New(syslog.LOG_INFO, "gosshpot")
+    if err != nil {
+        log.Fatalln(err)
+    }
+
+    log.SetOutput(syslogger)
 
 	flag.Usage = func() {
 		fmt.Print(help)
