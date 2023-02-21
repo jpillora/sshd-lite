@@ -9,8 +9,8 @@ RUN go build \
   -ldflags "-s -w -X main.version=$(git describe --abbrev=0 --tags)" \
   -o /tmp/bin
 # run stage
-FROM scratch
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+FROM alpine:latest
+RUN apk update && apk add bash git curl htop tree ca-certificates && rm -rf /var/cache/apk/*
 WORKDIR /app
 COPY --from=build /tmp/bin /app/bin
 ENTRYPOINT ["/app/bin"]
