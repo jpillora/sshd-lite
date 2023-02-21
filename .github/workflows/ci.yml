@@ -41,7 +41,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
       - name: goreleaser
-        uses: docker://goreleaser/goreleaser:latest
+        uses: docker://goreleaser/goreleaser:v1.6.2
         env:
           GITHUB_USER: ${{ github.repository_owner }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
