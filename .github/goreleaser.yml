@@ -13,22 +13,29 @@ builds:
   - main: ./main.go
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
     ldflags:
       - -s -w -X main.version={{.Version}}
-    gcflags:
-      - "all=-trimpath={{.Env.GOPATH}}"
     goos:
       - linux
-      - windows
       - darwin
+      - windows
+      - openbsd
     goarch:
-      - 386
+      - '386'
       - amd64
       - arm
       - arm64
     goarm:
-      - 6
-      - 7
+      - '6'
+      - '7'
+nfpms:
+  - maintainer: "https://github.com/{{ .Env.GITHUB_USER }}"
+    formats:
+      - deb
+      - rpm
+      - apk
 archives:
   - replacements:
       darwin: Darwin
