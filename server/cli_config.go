@@ -1,6 +1,6 @@
 package sshd
 
-//Config is ...
+// Config is the configuration for the server
 type Config struct {
 	Host       string
 	Port       string
@@ -8,11 +8,12 @@ type Config struct {
 	KeyFile    string
 	KeySeed    string
 	AuthType   string
+	KeepAlive  int
 	IgnoreEnv  bool
 	LogVerbose bool
 }
 
-//NewConfig creates a new Config
+// NewConfig creates a new Config
 func NewConfig(keyFile string, keySeed string) *Config {
 	return &Config{
 		KeyFile: keyFile,

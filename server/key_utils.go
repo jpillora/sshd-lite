@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -8,7 +9,9 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -31,6 +34,35 @@ func generateKey(seed string) ([]byte, error) {
 	}
 	b := x509.MarshalPKCS1PrivateKey(priv)
 	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: b}), nil
+}
+
+func githubKeys(user string) (map[string]string, error) {
+	resp, err := http.Get("https://github.com/" + user + ".keys")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch github user keys: %w", err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return parseKeys(b)
+}
+
+func parseKeys(b []byte) (map[string]string, error) {
+	lines := bytes.Split(b, []byte("\n"))
+	//parse each line
+	keys := map[string]string{}
+	for _, l := range lines {
+		if key, cmt, _, _, err := ssh.ParseAuthorizedKey(l); err == nil {
+			keys[string(key.Marshal())] = cmt
+		}
+	}
+	//ensure we got something
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("no keys found")
+	}
+	return keys, nil
 }
 
 func fingerprint(k ssh.PublicKey) string {
