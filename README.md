@@ -72,22 +72,26 @@ exit status 1
     --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
     --keyseed, a string to use to seed key generation
     --noenv, ignore environment variables provided by the client
+    --keepalive, server keep alive interval seconds (defaults to 60, 0 to disable)
     --version, display version
-    -v, verbose logs
+    --verbose -v, verbose logs
 
   <auth> must be set to one of:
-    1. a username and password string separated by a colon ("user:pass")
+    1. a username and password string separated by a colon ("myuser:mypass")
     2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
-    3. "none" to disable client authentication :WARNING: very insecure
+    3. an authorized github user ("github.com/myuser") public keys from .keys
+    4. "none" to disable client authentication :WARNING: very insecure
 
   Notes:
     * if no keyfile and no keyseed are set, a random RSA2048 key is used
-    * once authenticated, clients will login to a shell as the
-    sshd-lite user. sshd-lite does not lookup system users.
+    * authorized_key files are automatically reloaded on change
+    * once authenticated, clients will have access to a shell of the
+    current user. sshd-lite does not lookup system users.
     * sshd-lite only supports remotes shells. tunnelling and command
     execution are not currently supported.
 
   Read more: https://github.com/jpillora/sshd-lite
+
 ```
 <!--/tmpl-->
 
