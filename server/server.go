@@ -66,21 +66,24 @@ func (s *Server) Start() error {
 			log.Printf("Failed to accept incoming connection (%s)", err)
 			continue
 		}
-		// Before use, a handshake must be performed on the incoming net.Conn.
-		sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, s.config)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Failed to handshake (%s)", err)
-			}
-			continue
-		}
-
-		s.debugf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
-		// Discard all global out-of-band Requests
-		go ssh.DiscardRequests(reqs)
-		// Accept all channels
-		go s.handleChannels(chans)
+		go s.handleConn(tcpConn)
 	}
+}
+
+func (s *Server) handleConn(tcpConn net.Conn) {
+	// Before use, a handshake must be performed on the incoming net.Conn.
+	sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, s.config)
+	if err != nil {
+		if err != io.EOF {
+			log.Printf("Failed to handshake (%s)", err)
+		}
+		return
+	}
+	s.debugf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
+	// Discard all global out-of-band Requests
+	go ssh.DiscardRequests(reqs)
+	// Accept all channels
+	go s.handleChannels(chans)
 }
 
 func (s *Server) handleChannels(chans <-chan ssh.NewChannel) {
