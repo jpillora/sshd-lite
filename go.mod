@@ -1,6 +1,6 @@
 module github.com/jpillora/sshd-lite
 
-go 1.20
+go 1.19
 
 // Getting this reified version of an upstream pty pull request
 // until it is merged into the main project.
