@@ -1,5 +1,5 @@
 # build stage
-FROM golang:1.20-alpine AS build
+FROM golang:1-alpine AS build
 RUN apk update && apk add git
 ADD . /src
 WORKDIR /src
