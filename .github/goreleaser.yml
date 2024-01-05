@@ -1,17 +1,7 @@
 # test this file with
-#   goreleaser --skip-publish --rm-dist --config goreleaser.yml
-#
-# Notes:
-# In order to publish to github, we need a GitHub token.
-# This token should be in ~/.config/goreleaser/github_token
-# Then, to release, ensure that the released commit is tagged.
-before:
-  hooks:
-    - go mod tidy
-    - go generate ./...
+#   GITHUB_USER=jpillora goreleaser --skip-publish --rm-dist --config .github/goreleaser.yml
 builds:
-  - main: ./main.go
-    env:
+  - env:
       - CGO_ENABLED=0
     flags:
       - -trimpath
@@ -23,10 +13,17 @@ builds:
       - windows
       - openbsd
     goarch:
-      - '386'
+      - 386
       - amd64
       - arm
       - arm64
+      - ppc64
+      - ppc64le
+      - mips
+      - mipsle
+      - mips64
+      - mips64le
+      - s390x
     goarm:
       - '6'
       - '7'
@@ -37,32 +34,11 @@ nfpms:
       - rpm
       - apk
 archives:
-  - replacements:
-      darwin: Darwin
-      linux: Linux
-      windows: Windows
-      386: i386
-      amd64: x86_64
-    format: gz
+  - format: gz
     files:
       - none*
-checksum:
-  name_template: 'checksums.txt'
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
-release:
-  github:
-    owner: jpillora
-    name: sshd-lite
-  header: |
-    ## Release {{ .Tag }} on {{ .Date }}
-    
-  # auto-publish?
-  draft: false
-  # mark as production ready?
-  prerelease: auto
+    rlcp: true
 changelog:
-  skip: false
   sort: asc
   filters:
     exclude:
