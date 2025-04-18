@@ -11,6 +11,7 @@ type Config struct {
 	KeepAlive  int
 	IgnoreEnv  bool
 	LogVerbose bool
+	SFTP       bool
 }
 
 // NewConfig creates a new Config
