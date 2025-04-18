@@ -20,7 +20,7 @@ $ go get -v github.com/jpillora/sshd-lite
 
 * Cross platform binaries with no dependencies
 * Remote shells (`bash` in linux/mac and `powershell` in windows)
-* Authentication (`user:pass` and `authorized_keys`)
+* Authentication (`user:pass`, `~/.ssh/authorized_keys`, `github.com/foobar`, or `none`)
 * Seed server-key generation
 * Enable SFTP support with `--sftp` (allows `scp` and other SFTP clients)
 
@@ -91,7 +91,7 @@ exit status 1
     current user. sshd-lite does not lookup system users.
     * sshd-lite only supports remotes shells. tunnelling and command
     execution are not currently supported.
-    * SFTP access requires the --sftp flag and operates relative to the directory where sshd-lite was started.
+  	* sftp working directory is the home directory of the user
 
   Read more: https://github.com/jpillora/sshd-lite
 
