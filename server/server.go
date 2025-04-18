@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -57,7 +59,9 @@ func (s *Server) Start() error {
 			return fmt.Errorf("failed to listen on " + p)
 		}
 	}
-
+	if s.cli.SFTP {
+		log.Print("SFTP enabled")
+	}
 	// Accept all connections
 	log.Printf("Listening on %s:%s...", h, p)
 	for {
@@ -127,6 +131,7 @@ func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Req
 	defer close(resizes)
 	// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 	for req := range requests {
+		s.debugf("Request type: %s", req.Type)
 		switch req.Type {
 		case "pty-req":
 			termLen := req.Payload[3]
@@ -158,9 +163,70 @@ func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Req
 			req.Reply(err == nil, nil)
 		case "exec":
 			s.debugf("exec ignored '%s'", req.Payload)
+		case "subsystem":
+			s.handleSubsystemRequest(connection, req)
 		default:
 			s.debugf("unkown request: %s (reply: %v, data: %x)", req.Type, req.WantReply, req.Payload)
 		}
+	}
+	s.debugf("Closing handler for requests")
+}
+
+// handleSubsystemRequest handles 'subsystem' requests from the client.
+func (s *Server) handleSubsystemRequest(connection ssh.Channel, req *ssh.Request) {
+	// https://datatracker.ietf.org/doc/html/rfc4254#section-6.5
+	// subsystem name is a string encoded as: [uint32 length][string name]
+	if len(req.Payload) < 4 {
+		s.debugf("Malformed subsystem request payload")
+		req.Reply(false, nil)
+		return
+	}
+	length := binary.BigEndian.Uint32(req.Payload)
+	match := uint32(len(req.Payload)-4) == length
+	if !match {
+		s.debugf("Subsystem name length mismatch in payload")
+		req.Reply(false, nil)
+		return
+	}
+	subsystem := string(req.Payload[4:])
+	if subsystem == "sftp" {
+		if !s.cli.SFTP { // Check if SFTP is enabled in config
+			s.debugf("SFTP subsystem request received but SFTP is disabled")
+			req.Reply(false, []byte("SFTP is disabled on this server"))
+			return
+		}
+		s.debugf("SFTP subsystem request accepted")
+		req.Reply(true, nil) // Acknowledge the request
+		go s.startSFTPServer(connection)
+	} else {
+		s.debugf("Unsupported subsystem requested: %q", subsystem)
+		req.Reply(false, nil) // Reject unsupported subsystems
+		connection.Close()
+	}
+}
+
+// startSFTPServer starts the SFTP server for the given connection.
+func (s *Server) startSFTPServer(connection ssh.Channel) {
+	defer connection.Close()
+	opts := []sftp.ServerOption{}
+	if d, err := os.UserHomeDir(); err == nil {
+		opts = append(opts, sftp.WithServerWorkingDirectory(d))
+	}
+	if s.cli.LogVerbose {
+		opts = append(opts, sftp.WithDebug(os.Stderr))
+	}
+	sftpServer, err := sftp.NewServer(
+		connection,
+		opts...,
+	)
+	if err != nil {
+		s.debugf("Failed to create SFTP server: %v", err)
+		return
+	}
+	if err := sftpServer.Serve(); err != nil && err != io.EOF {
+		s.debugf("SFTP request error: %s", err)
+	} else {
+		s.debugf("SFTP request served")
 	}
 }
 
@@ -189,9 +255,15 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 	close := func() {
 		connection.Close()
 		if shell.Process != nil {
-			if ps, err := shell.Process.Wait(); err != nil && ps != nil {
-				log.Printf("Failed to exit shell (%s)", err)
+			// Use Signal instead of Wait to avoid blocking if process already exited
+			err := shell.Process.Signal(os.Interrupt)
+			if err != nil && !strings.Contains(err.Error(), "process already finished") && !strings.Contains(err.Error(), "already exited") {
+				log.Printf("Failed to interrupt shell: %s", err)
 			}
+			// Give a short time for the process to exit gracefully before killing
+			time.Sleep(100 * time.Millisecond)
+			shell.Process.Kill() // Ensure process is killed
+			shell.Process.Wait() // Wait for cleanup
 		}
 		s.debugf("Session closed")
 	}
@@ -224,15 +296,16 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 		// Start proactively listening for process death, for those ptys that
 		// don't signal on EOF.
 		if shell.Process != nil {
-			if ps, err := shell.Process.Wait(); err != nil && ps != nil {
-				log.Printf("Failed to exit shell (%s)", err)
+			if ps, err := shell.Process.Wait(); err != nil && ps != nil && !strings.Contains(err.Error(), "wait: no child processes") && !strings.Contains(err.Error(), "exit status") && !strings.Contains(err.Error(), "Wait was already called") {
+				log.Printf("Shell process wait error: (%s)", err)
 			}
 			// It appears that closing the pty is an idempotent operation
 			// therefore making this call ensures that the other two coroutines
 			// will fall through and exit, and there is no downside.
-			shellf.Close()
+			shellf.Close() // Close the pty file descriptor
 		}
-		s.debugf("Shell terminated and Session closed")
+		s.debugf("Shell terminated")
+		once.Do(close) // Ensure connection is closed when shell exits
 	}()
 	return nil
 }

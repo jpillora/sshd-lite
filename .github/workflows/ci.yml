@@ -11,7 +11,7 @@ jobs:
     name: Build & Test
     strategy:
       matrix:
-        go-version: ['1.21']
+        go-version: ["stable"]
         platform: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: goreleaser
         uses: docker://goreleaser/goreleaser:latest
         env:
@@ -86,4 +86,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
