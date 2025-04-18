@@ -1,10 +1,8 @@
-name: Auto-approve and merge Dependabot Go updates
+name: Auto-approve and merge Dependabot updates
 
 on:
   pull_request:
     branches: [master]
-    paths:
-      - "go.mod"
 
 jobs:
   auto-approve-and-merge:
@@ -19,36 +17,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check if Go version was updated
-        id: check-go-update
-        run: |
-          PR_DIFF=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}")
-
-          # Extract PR title and check if it's a Go update
-          PR_TITLE=$(echo "$PR_DIFF" | jq -r '.title')
-          if [[ "$PR_TITLE" == *"go "* && "$PR_TITLE" == *"to "* ]]; then
-            echo "go_updated=true" >> $GITHUB_OUTPUT
-          else
-            echo "go_updated=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Approve Dependabot PR for Go updates
-        if: steps.check-go-update.outputs.go_updated == 'true'
+      - name: Approve Dependabot PR
         run: |
           gh pr review ${{ github.event.pull_request.number }} --approve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Merge PR
-        if: steps.check-go-update.outputs.go_updated == 'true'
         run: |
           gh pr merge ${{ github.event.pull_request.number }} --merge
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Bump minor tag
-        if: steps.check-go-update.outputs.go_updated == 'true'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -68,11 +49,11 @@ jobs:
             
             # Create and push the new tag
             echo "Bumping $latest_tag to $new_tag"
-            git tag -a "$new_tag" -m "Bump minor version for Go update"
+            git tag -a "$new_tag" -m "Bump minor version for dependency update"
             git push origin "$new_tag"
           else
             echo "No valid semver tag found, creating v0.1.0"
-            git tag -a "v0.1.0" -m "Initial tag for Go update"
+            git tag -a "v0.1.0" -m "Initial tag for dependency update"
             git push origin "v0.1.0"
           fi
         env:
