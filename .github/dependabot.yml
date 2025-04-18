@@ -10,3 +10,11 @@ updates:
     commit-message:
       prefix: "go"
       include: "scope"
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
