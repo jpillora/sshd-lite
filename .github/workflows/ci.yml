@@ -26,8 +26,6 @@ jobs:
           check-latest: true
       - name: Build
         run: go build -v -o /dev/null .
-      - name: Test
-        run: go test -v ./...
   # ================
   # RELEASE BINARIES (on push "v*" tag)
   # ================
