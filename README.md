@@ -23,6 +23,7 @@ $ go get -v github.com/jpillora/sshd-lite
 * Authentication (`user:pass`, `~/.ssh/authorized_keys`, `github.com/foobar`, or `none`)
 * Seed server-key generation
 * Enable SFTP support with `--sftp` (allows `scp` and other SFTP clients)
+* Enable TCP forwarding with `--tcp-forwarding` (both local and reverse forwarding)
 
 ### Quick use
 
@@ -57,10 +58,10 @@ Wed  9 Dec 2020 23:57:22 AEDT
 $ sshd-lite --help
 ```
 
-<!--tmpl,code=plain:echo "$ sshd-lite --help" && go run main.go --help | sed 's#0.0.0-src#X.Y.Z#' -->
+<!-- regenerate help with: go install -v github.com/jpillora/md-tmpl@latest && md-tmpl -w README.md -->
+<!--tmpl,code=plain:echo "$ sshd-lite --help" && go run main.go --help 2>/dev/null | sed 's#0.0.0-src#X.Y.Z#' -->
 ``` plain 
 $ sshd-lite --help
-exit status 1
 
   Usage: sshd-lite [options] <auth>
 
@@ -74,7 +75,8 @@ exit status 1
     --keyseed, a string to use to seed key generation
     --noenv, ignore environment variables provided by the client
     --keepalive, server keep alive interval seconds (defaults to 60, 0 to disable)
-    --sftp, enable the SFTP subsystem (disabled by default)
+    --sftp -s, enable the SFTP subsystem (disabled by default)
+    --tcp-forwarding -t, enable TCP forwarding (both local and reverse, disabled by default)
     --version, display version
     --verbose -v, verbose logs
 
@@ -89,9 +91,9 @@ exit status 1
     * authorized_key files are automatically reloaded on change
     * once authenticated, clients will have access to a shell of the
     current user. sshd-lite does not lookup system users.
-    * sshd-lite only supports remotes shells. tunnelling and command
+    * sshd-lite only supports remotes shells, sftp, and tcp forwarding. command
     execution are not currently supported.
-  	* sftp working directory is the home directory of the user
+    * sftp working directory is the home directory of the user
 
   Read more: https://github.com/jpillora/sshd-lite
 

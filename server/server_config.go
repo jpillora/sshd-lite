@@ -2,8 +2,8 @@ package sshd
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -31,7 +31,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	var key []byte
 	if s.cli.KeyFile != "" {
 		//user provided key (can generate with 'ssh-keygen -t rsa')
-		b, err := ioutil.ReadFile(s.cli.KeyFile)
+		b, err := os.ReadFile(s.cli.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load keyfile")
 		}

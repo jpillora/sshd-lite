@@ -2,16 +2,17 @@ package sshd
 
 // Config is the configuration for the server
 type Config struct {
-	Host       string
-	Port       string
-	Shell      string
-	KeyFile    string
-	KeySeed    string
-	AuthType   string
-	KeepAlive  int
-	IgnoreEnv  bool
-	LogVerbose bool
-	SFTP       bool
+	Host          string
+	Port          string
+	Shell         string
+	KeyFile       string
+	KeySeed       string
+	AuthType      string
+	KeepAlive     int
+	IgnoreEnv     bool
+	LogVerbose    bool
+	SFTP          bool
+	TCPForwarding bool
 }
 
 // NewConfig creates a new Config
