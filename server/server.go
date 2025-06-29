@@ -341,7 +341,7 @@ func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time,
 		return nil, last, fmt.Errorf("missing auth keys file")
 	}
 	t := info.ModTime()
-	if t.Before(last) || t == last {
+	if t.Before(last) || t.Equal(last) {
 		return nil, last, fmt.Errorf("not updated")
 	}
 	b, _ := os.ReadFile(s.config.AuthType)

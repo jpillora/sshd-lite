@@ -8,12 +8,16 @@ A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). A slightly
 
 See [the latest release](https://github.com/jpillora/sshd-lite/releases/latest)
 
-One-line-download and install `curl https://i.jpillora.com/sshd-lite! | bash`
+One-line download and install
+
+```sh
+curl https://i.jpillora.com/sshd-lite! | bash
+```
 
 **Source**
 
 ``` sh
-$ go install github.com/jpillora/sshd-lite@latest
+go install github.com/jpillora/sshd-lite@latest
 ```
 
 ### Features
