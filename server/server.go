@@ -18,19 +18,19 @@ import (
 
 // Server is a simple SSH Daemon
 type Server struct {
-	cli                  *Config
-	config               *ssh.ServerConfig
+	config               *Config
+	sshConfig            *ssh.ServerConfig
 	tcpForwardingHandler *TCPForwardingHandler
 }
 
 // NewServer creates a new Server
 func NewServer(c *Config) (*Server, error) {
-	s := &Server{cli: c}
+	s := &Server{config: c}
 	sc, err := s.computeSSHConfig()
 	if err != nil {
 		return nil, err
 	}
-	s.config = sc
+	s.sshConfig = sc
 
 	// Initialize TCP forwarding handler if enabled
 	if c.TCPForwarding {
@@ -42,8 +42,8 @@ func NewServer(c *Config) (*Server, error) {
 
 // Start listening on port
 func (s *Server) Start() error {
-	h := s.cli.Host
-	p := s.cli.Port
+	h := s.config.Host
+	p := s.config.Port
 	var l net.Listener
 	var err error
 
@@ -65,17 +65,18 @@ func (s *Server) Start() error {
 		}
 	}
 
-	return s.startWith(l)
+	return s.StartWith(l)
 }
 
-// startWith starts the server with the provided listener
-func (s *Server) startWith(l net.Listener) error {
+// StartWith starts the server with the provided listener.
+// Ignores the Host and Port in the config.
+func (s *Server) StartWith(l net.Listener) error {
 	defer l.Close()
 
-	if s.cli.SFTP {
+	if s.config.SFTP {
 		log.Print("SFTP enabled")
 	}
-	if s.cli.TCPForwarding {
+	if s.config.TCPForwarding {
 		log.Print("TCP forwarding enabled")
 	}
 
@@ -97,7 +98,7 @@ func (s *Server) startWith(l net.Listener) error {
 
 func (s *Server) handleConn(tcpConn net.Conn) {
 	// Before use, a handshake must be performed on the incoming net.Conn.
-	sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, s.config)
+	sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, s.sshConfig)
 	if err != nil {
 		if err != io.EOF {
 			log.Printf("Failed to handshake (%s)", err)
@@ -107,7 +108,7 @@ func (s *Server) handleConn(tcpConn net.Conn) {
 	s.debugf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
 
 	// Handle global requests (for TCP forwarding)
-	if s.cli.TCPForwarding && s.tcpForwardingHandler != nil {
+	if s.config.TCPForwarding && s.tcpForwardingHandler != nil {
 		go s.handleGlobalRequests(reqs, sshConn)
 	} else {
 		// Discard all global out-of-band Requests if TCP forwarding is disabled
@@ -146,7 +147,7 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 
 	case "direct-tcpip":
 		// Handle direct TCP/IP forwarding (local forwarding)
-		if s.cli.TCPForwarding && s.tcpForwardingHandler != nil {
+		if s.config.TCPForwarding && s.tcpForwardingHandler != nil {
 			go s.tcpForwardingHandler.HandleDirectTCPIP(newChannel)
 		} else {
 			s.debugf("direct-tcpip request received but TCP forwarding is disabled")
@@ -161,7 +162,7 @@ func (s *Server) handleChannel(newChannel ssh.NewChannel) {
 
 func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Request) {
 	// start keep alive loop
-	if ka := s.cli.KeepAlive; ka > 0 {
+	if ka := s.config.KeepAlive; ka > 0 {
 		ticking := make(chan bool, 1)
 		interval := time.Duration(ka) * time.Second
 		go s.keepAlive(connection, interval, ticking)
@@ -189,7 +190,7 @@ func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Req
 			ssh.Unmarshal(req.Payload, &e)
 			kv := e.Name + "=" + e.Value
 			s.debugf("env: %s", kv)
-			if !s.cli.IgnoreEnv {
+			if !s.config.IgnoreEnv {
 				env = appendEnv(env, kv)
 			}
 		case "shell":
@@ -244,7 +245,7 @@ func (s *Server) handleSubsystemRequest(connection ssh.Channel, req *ssh.Request
 }
 
 func (s *Server) handleSFTP(connection ssh.Channel, _ *ssh.Request) bool {
-	if !s.cli.SFTP { // Check if SFTP is enabled in config
+	if !s.config.SFTP { // Check if SFTP is enabled in config
 		s.debugf("SFTP subsystem request received but SFTP is disabled")
 		return false
 	}
@@ -272,7 +273,7 @@ func (s *Server) keepAlive(connection ssh.Channel, interval time.Duration, ticki
 }
 
 func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-chan []byte) error {
-	shell := exec.Command(s.cli.Shell)
+	shell := exec.Command(s.config.Shell)
 	shell.Env = env
 	s.debugf("Session env: %v", env)
 
@@ -335,7 +336,7 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 }
 
 func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time, error) {
-	info, err := os.Stat(s.cli.AuthType)
+	info, err := os.Stat(s.config.AuthType)
 	if err != nil {
 		return nil, last, fmt.Errorf("missing auth keys file")
 	}
@@ -343,7 +344,7 @@ func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time,
 	if t.Before(last) || t == last {
 		return nil, last, fmt.Errorf("not updated")
 	}
-	b, _ := os.ReadFile(s.cli.AuthType)
+	b, _ := os.ReadFile(s.config.AuthType)
 	keys, err := parseKeys(b)
 	if err != nil {
 		return nil, last, err
@@ -352,7 +353,7 @@ func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time,
 }
 
 func (s *Server) debugf(f string, args ...interface{}) {
-	if s.cli.LogVerbose {
+	if s.config.LogVerbose {
 		log.Printf(f, args...)
 	}
 }
@@ -407,7 +408,7 @@ func (s *Server) handleExecRequest(connection ssh.Channel, req *ssh.Request, env
 func (s *Server) executeCommand(connection ssh.Channel, command string, env []string) {
 	defer connection.Close()
 	// Use shell to execute the command
-	cmd := exec.Command(s.cli.Shell, "-c", command)
+	cmd := exec.Command(s.config.Shell, "-c", command)
 	cmd.Env = env          // TODO: append?
 	cmd.Stdin = connection // Connect stdin to the SSH channel
 	cmd.Stdout = connection

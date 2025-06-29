@@ -15,7 +15,7 @@ func (s *Server) startSFTPServer(connection ssh.Channel) {
 	if d, err := os.UserHomeDir(); err == nil {
 		opts = append(opts, sftp.WithServerWorkingDirectory(d))
 	}
-	if s.cli.LogVerbose {
+	if s.config.LogVerbose {
 		opts = append(opts, sftp.WithDebug(os.Stderr))
 	}
 	sftpServer, err := sftp.NewServer(

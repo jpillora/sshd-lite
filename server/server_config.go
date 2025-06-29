@@ -14,31 +14,31 @@ import (
 
 func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	sc := &ssh.ServerConfig{}
-	if s.cli.Shell == "" {
+	if s.config.Shell == "" {
 		if runtime.GOOS == "windows" {
-			s.cli.Shell = "powershell"
+			s.config.Shell = "powershell"
 		} else {
-			s.cli.Shell = "bash"
+			s.config.Shell = "bash"
 		}
 	}
-	p, err := exec.LookPath(s.cli.Shell)
+	p, err := exec.LookPath(s.config.Shell)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find shell: %s", s.cli.Shell)
+		return nil, fmt.Errorf("failed to find shell: %s", s.config.Shell)
 	}
-	s.cli.Shell = p
-	s.debugf("Session shell %s", s.cli.Shell)
+	s.config.Shell = p
+	s.debugf("Session shell %s", s.config.Shell)
 
 	var key []byte
-	if s.cli.KeyFile != "" {
+	if s.config.KeyFile != "" {
 		//user provided key (can generate with 'ssh-keygen -t rsa')
-		b, err := os.ReadFile(s.cli.KeyFile)
+		b, err := os.ReadFile(s.config.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load keyfile")
 		}
 		key = b
 	} else {
 		//generate key now
-		b, err := generateKey(s.cli.KeySeed)
+		b, err := generateKey(s.config.KeySeed)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate private key")
 		}
@@ -48,9 +48,9 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key")
 	}
-	if s.cli.KeyFile != "" {
-		log.Printf("Key from file %s", s.cli.KeyFile)
-	} else if s.cli.KeySeed == "" {
+	if s.config.KeyFile != "" {
+		log.Printf("Key from file %s", s.config.KeyFile)
+	} else if s.config.KeySeed == "" {
 		log.Printf("Key from system rng")
 	} else {
 		log.Printf("Key from seed")
@@ -60,16 +60,16 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	log.Printf("RSA key fingerprint is %s", fingerprint(pri.PublicKey()))
 
 	//setup auth
-	if s.cli.AuthType == "none" {
+	if s.config.AuthType == "none" {
 		sc.NoClientAuth = true // very dangerous
 		log.Printf("Authentication disabled")
-	} else if strings.HasPrefix(s.cli.AuthType, "github.com/") {
-		username := strings.TrimPrefix(s.cli.AuthType, "github.com/")
+	} else if strings.HasPrefix(s.config.AuthType, "github.com/") {
+		username := strings.TrimPrefix(s.config.AuthType, "github.com/")
 		if err := s.githubCallback(username, sc); err != nil {
 			return nil, err
 		}
-	} else if strings.Contains(s.cli.AuthType, ":") {
-		pair := strings.SplitN(s.cli.AuthType, ":", 2)
+	} else if strings.Contains(s.config.AuthType, ":") {
+		pair := strings.SplitN(s.config.AuthType, ":", 2)
 		u := pair[0]
 		p := pair[1]
 		sc.PasswordCallback = func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
@@ -81,7 +81,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 			return nil, fmt.Errorf("denied")
 		}
 		log.Printf("Authentication enabled (user '%s')", u)
-	} else if s.cli.AuthType != "" {
+	} else if s.config.AuthType != "" {
 		if err := s.fileCallback(sc); err != nil {
 			return nil, err
 		}
