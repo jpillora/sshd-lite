@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -14,14 +13,14 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
 // Server is a simple SSH Daemon
 type Server struct {
-	cli    *Config
-	config *ssh.ServerConfig
+	cli                  *Config
+	config               *ssh.ServerConfig
+	tcpForwardingHandler *TCPForwardingHandler
 }
 
 // NewServer creates a new Server
@@ -32,6 +31,12 @@ func NewServer(c *Config) (*Server, error) {
 		return nil, err
 	}
 	s.config = sc
+
+	// Initialize TCP forwarding handler if enabled
+	if c.TCPForwarding {
+		s.tcpForwardingHandler = NewTCPForwardingHandler(s)
+	}
+
 	return s, nil
 }
 
@@ -56,17 +61,33 @@ func (s *Server) Start() error {
 	} else {
 		l, err = net.Listen("tcp", h+":"+p)
 		if err != nil {
-			return fmt.Errorf("failed to listen on " + p)
+			return fmt.Errorf("failed to listen on %s", p)
 		}
 	}
+
+	return s.startWith(l)
+}
+
+// startWith starts the server with the provided listener
+func (s *Server) startWith(l net.Listener) error {
+	defer l.Close()
+
 	if s.cli.SFTP {
 		log.Print("SFTP enabled")
 	}
+	if s.cli.TCPForwarding {
+		log.Print("TCP forwarding enabled")
+	}
+
 	// Accept all connections
-	log.Printf("Listening on %s:%s...", h, p)
+	log.Printf("Listening on %s...", l.Addr())
 	for {
 		tcpConn, err := l.Accept()
 		if err != nil {
+			// Check if the error is due to listener being closed
+			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
+				return nil // Expected error when stopping
+			}
 			log.Printf("Failed to accept incoming connection (%s)", err)
 			continue
 		}
@@ -84,8 +105,15 @@ func (s *Server) handleConn(tcpConn net.Conn) {
 		return
 	}
 	s.debugf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
-	// Discard all global out-of-band Requests
-	go ssh.DiscardRequests(reqs)
+
+	// Handle global requests (for TCP forwarding)
+	if s.cli.TCPForwarding && s.tcpForwardingHandler != nil {
+		go s.handleGlobalRequests(reqs, sshConn)
+	} else {
+		// Discard all global out-of-band Requests if TCP forwarding is disabled
+		go ssh.DiscardRequests(reqs)
+	}
+
 	// Accept all channels
 	go s.handleChannels(chans)
 }
@@ -98,23 +126,37 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel) {
 }
 
 func (s *Server) handleChannel(newChannel ssh.NewChannel) {
-	if t := newChannel.ChannelType(); t != "session" {
-		newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", t))
-		return
-	}
+	channelType := newChannel.ChannelType()
+	s.debugf("Channel request '%s'", channelType)
 
-	s.debugf("Channel request '%s'", newChannel.ChannelType())
-	if d := newChannel.ExtraData(); len(d) > 0 {
-		s.debugf("Channel data: '%s' %x", d, d)
-	}
+	switch channelType {
+	case "session":
+		// Handle regular SSH sessions
+		if d := newChannel.ExtraData(); len(d) > 0 {
+			s.debugf("Channel data: '%s' %x", d, d)
+		}
 
-	connection, requests, err := newChannel.Accept()
-	if err != nil {
-		s.debugf("Could not accept channel (%s)", err)
-		return
+		connection, requests, err := newChannel.Accept()
+		if err != nil {
+			s.debugf("Could not accept channel (%s)", err)
+			return
+		}
+		s.debugf("Channel accepted")
+		go s.handleRequests(connection, requests)
+
+	case "direct-tcpip":
+		// Handle direct TCP/IP forwarding (local forwarding)
+		if s.cli.TCPForwarding && s.tcpForwardingHandler != nil {
+			go s.tcpForwardingHandler.HandleDirectTCPIP(newChannel)
+		} else {
+			s.debugf("direct-tcpip request received but TCP forwarding is disabled")
+			newChannel.Reject(ssh.Prohibited, "TCP forwarding is disabled")
+		}
+
+	default:
+		s.debugf("Unknown channel type: %s", channelType)
+		newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", channelType))
 	}
-	s.debugf("Channel accepted")
-	go s.handleRequests(connection, requests)
 }
 
 func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Request) {
@@ -162,9 +204,14 @@ func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Req
 			}
 			req.Reply(err == nil, nil)
 		case "exec":
-			s.debugf("exec ignored '%s'", req.Payload)
+			ok := s.handleExecRequest(connection, req, env)
+			req.Reply(ok, nil)
 		case "subsystem":
-			s.handleSubsystemRequest(connection, req)
+			ok := s.handleSubsystemRequest(connection, req)
+			if !ok {
+				req.Reply(false, nil) // Reject unsupported subsystems
+				connection.Close()
+			}
 		default:
 			s.debugf("unkown request: %s (reply: %v, data: %x)", req.Type, req.WantReply, req.Payload)
 		}
@@ -173,61 +220,38 @@ func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Req
 }
 
 // handleSubsystemRequest handles 'subsystem' requests from the client.
-func (s *Server) handleSubsystemRequest(connection ssh.Channel, req *ssh.Request) {
+func (s *Server) handleSubsystemRequest(connection ssh.Channel, req *ssh.Request) bool {
 	// https://datatracker.ietf.org/doc/html/rfc4254#section-6.5
 	// subsystem name is a string encoded as: [uint32 length][string name]
 	if len(req.Payload) < 4 {
 		s.debugf("Malformed subsystem request payload")
-		req.Reply(false, nil)
-		return
+		return false
 	}
 	length := binary.BigEndian.Uint32(req.Payload)
 	match := uint32(len(req.Payload)-4) == length
 	if !match {
 		s.debugf("Subsystem name length mismatch in payload")
-		req.Reply(false, nil)
-		return
+		return false
 	}
 	subsystem := string(req.Payload[4:])
-	if subsystem == "sftp" {
-		if !s.cli.SFTP { // Check if SFTP is enabled in config
-			s.debugf("SFTP subsystem request received but SFTP is disabled")
-			req.Reply(false, []byte("SFTP is disabled on this server"))
-			return
-		}
-		s.debugf("SFTP subsystem request accepted")
-		req.Reply(true, nil) // Acknowledge the request
-		go s.startSFTPServer(connection)
-	} else {
+	switch subsystem {
+	case "sftp":
+		return s.handleSFTP(connection, req)
+	default:
 		s.debugf("Unsupported subsystem requested: %q", subsystem)
-		req.Reply(false, nil) // Reject unsupported subsystems
-		connection.Close()
+		return false
 	}
 }
 
-// startSFTPServer starts the SFTP server for the given connection.
-func (s *Server) startSFTPServer(connection ssh.Channel) {
-	defer connection.Close()
-	opts := []sftp.ServerOption{}
-	if d, err := os.UserHomeDir(); err == nil {
-		opts = append(opts, sftp.WithServerWorkingDirectory(d))
+func (s *Server) handleSFTP(connection ssh.Channel, _ *ssh.Request) bool {
+	if !s.cli.SFTP { // Check if SFTP is enabled in config
+		s.debugf("SFTP subsystem request received but SFTP is disabled")
+		return false
 	}
-	if s.cli.LogVerbose {
-		opts = append(opts, sftp.WithDebug(os.Stderr))
-	}
-	sftpServer, err := sftp.NewServer(
-		connection,
-		opts...,
-	)
-	if err != nil {
-		s.debugf("Failed to create SFTP server: %v", err)
-		return
-	}
-	if err := sftpServer.Serve(); err != nil && err != io.EOF {
-		s.debugf("SFTP request error: %s", err)
-	} else {
-		s.debugf("SFTP request served")
-	}
+	// req.Reply(false, []byte("SFTP is disabled on this server"))
+	s.debugf("SFTP subsystem request accepted")
+	go s.startSFTPServer(connection)
+	return true
 }
 
 func (s *Server) keepAlive(connection ssh.Channel, interval time.Duration, ticking <-chan bool) {
@@ -319,7 +343,7 @@ func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time,
 	if t.Before(last) || t == last {
 		return nil, last, fmt.Errorf("not updated")
 	}
-	b, _ := ioutil.ReadFile(s.cli.AuthType)
+	b, _ := os.ReadFile(s.cli.AuthType)
 	keys, err := parseKeys(b)
 	if err != nil {
 		return nil, last, err
@@ -343,4 +367,67 @@ func appendEnv(env []string, kv string) []string {
 		}
 	}
 	return append(env, kv)
+}
+
+func (s *Server) handleGlobalRequests(reqs <-chan *ssh.Request, conn ssh.Conn) {
+	for req := range reqs {
+		s.debugf("Global request: %s", req.Type)
+		if s.tcpForwardingHandler != nil {
+			s.tcpForwardingHandler.HandleGlobalRequest(req, conn)
+		} else {
+			if req.WantReply {
+				req.Reply(false, nil)
+			}
+		}
+	}
+}
+
+// handleExecRequest handles 'exec' requests from the client.
+func (s *Server) handleExecRequest(connection ssh.Channel, req *ssh.Request, env []string) bool {
+	// https://datatracker.ietf.org/doc/html/rfc4254#section-6.5
+	// command name is a string encoded as: [uint32 length][string command]
+	if len(req.Payload) < 4 {
+		s.debugf("Malformed exec request payload")
+		return false
+	}
+	length := binary.BigEndian.Uint32(req.Payload)
+	if uint32(len(req.Payload)-4) != length {
+		s.debugf("Command length mismatch in payload")
+		return false
+	}
+	command := string(req.Payload[4:])
+	s.debugf("exec command: %s", command)
+
+	// Execute the command
+	go s.executeCommand(connection, command, env)
+	return true
+}
+
+// executeCommand executes a shell command and pipes the output to the SSH connection
+func (s *Server) executeCommand(connection ssh.Channel, command string, env []string) {
+	defer connection.Close()
+	// Use shell to execute the command
+	cmd := exec.Command(s.cli.Shell, "-c", command)
+	cmd.Env = env          // TODO: append?
+	cmd.Stdin = connection // Connect stdin to the SSH channel
+	cmd.Stdout = connection
+	cmd.Stderr = connection
+	// capture exit status
+	type exit struct {
+		Status uint32
+	}
+	status := exit{Status: 0}
+	// Run the command
+	err := cmd.Run()
+	if err != nil {
+		s.debugf("Command execution failed: %s", err)
+		// Send exit status
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// Send exit status to client
+			status := exit{Status: uint32(exitErr.ExitCode())}
+			connection.SendRequest("exit-status", false, ssh.Marshal(&status))
+		}
+	}
+	s.debugf("Command execution completed")
+	connection.SendRequest("exit-status", false, ssh.Marshal(&status))
 }

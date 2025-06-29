@@ -1,0 +1,1 @@
+* test program compiles with `go build -o /dev/null`

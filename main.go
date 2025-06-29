@@ -25,6 +25,7 @@ var help = `
     --noenv, ignore environment variables provided by the client
     --keepalive, server keep alive interval seconds (defaults to 60, 0 to disable)
     --sftp -s, enable the SFTP subsystem (disabled by default)
+    --tcp-forwarding -t, enable TCP forwarding (both local and reverse, disabled by default)
     --version, display version
     --verbose -v, verbose logs
 
@@ -39,9 +40,9 @@ var help = `
     * authorized_key files are automatically reloaded on change
     * once authenticated, clients will have access to a shell of the
     current user. sshd-lite does not lookup system users.
-    * sshd-lite only supports remotes shells and sftp. tunnelling and command
+    * sshd-lite only supports remotes shells, sftp, and tcp forwarding. command
     execution are not currently supported.
-	* sftp working directory is the home directory of the user
+    * sftp working directory is the home directory of the user
 
   Read more: https://github.com/jpillora/sshd-lite
 
@@ -66,6 +67,8 @@ func main() {
 	flag.BoolVar(&c.IgnoreEnv, "noenv", false, "")
 	flag.BoolVar(&c.SFTP, "s", false, "")
 	flag.BoolVar(&c.SFTP, "sftp", false, "")
+	flag.BoolVar(&c.TCPForwarding, "t", false, "")
+	flag.BoolVar(&c.TCPForwarding, "tcp-forwarding", false, "")
 
 	//help/version
 	h1f := flag.Bool("h", false, "")
