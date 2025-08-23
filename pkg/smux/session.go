@@ -54,10 +54,21 @@ func (s *session) startShell() error {
 	s.Command = exec.Command(getDefaultShell())
 	s.Command.Env = os.Environ()
 
-	var err error
-	s.PTY, err = pty.Start(s.Command)
-	if err != nil {
-		return err
+	// Use a timeout to prevent hanging on Windows PTY issues
+	done := make(chan error, 1)
+	go func() {
+		var err error
+		s.PTY, err = pty.Start(s.Command)
+		done <- err
+	}()
+	
+	select {
+	case err := <-done:
+		if err != nil {
+			return err
+		}
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("timeout starting shell (PTY may not be supported on this platform)")
 	}
 
 	go s.monitor()
