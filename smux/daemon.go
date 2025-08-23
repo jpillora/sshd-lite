@@ -6,9 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"sync"
 	"syscall"
-
-	"github.com/jpillora/sshd-lite/server"
 )
 
 const (
@@ -16,6 +15,22 @@ const (
 	DefaultPIDPath    = "/var/run/smux.pid"
 	DefaultLogPath    = "/var/run/smux.log"
 )
+
+type Daemon struct {
+	sessionManager *SessionManager
+	httpServer     *HTTPServer
+	mu             sync.Mutex
+}
+
+func NewDaemon() *Daemon {
+	sessionManager := NewSessionManager()
+	httpServer := NewHTTPServer(sessionManager)
+	
+	return &Daemon{
+		sessionManager: sessionManager,
+		httpServer:     httpServer,
+	}
+}
 
 func IsDaemonRunning() bool {
 	pidBytes, err := os.ReadFile(DefaultPIDPath)
@@ -66,20 +81,12 @@ func RunDaemonProcess(foreground bool) error {
 	}
 	defer os.Remove(DefaultPIDPath)
 	
-	os.Remove(DefaultSocketPath)
+	daemon := NewDaemon()
 	
-	config := &sshd.Config{
-		Shell:     "/bin/bash",
-		SFTP:      false,
-		AuthType:  "password",
-		IgnoreEnv: true,
-	}
+	// Create a default session
+	log.Println("Creating default session")
+	daemon.sessionManager.CreateSession("default", "Default Shell")
 	
-	server, err := sshd.NewServer(config)
-	if err != nil {
-		return fmt.Errorf("failed to create server: %v", err)
-	}
-	
-	log.Printf("Starting daemon on %s", DefaultSocketPath)
-	return server.StartUnixSocket(DefaultSocketPath)
+	log.Printf("Starting HTTP server on port %d", HTTPPort)
+	return daemon.httpServer.Start()
 }
