@@ -85,9 +85,7 @@ func StartDaemonBackground() error {
 	}
 	
 	cmd := exec.Command(os.Args[0], "daemon", "--foreground")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
+	setupDaemonProcess(cmd)
 	
 	return cmd.Start()
 }
