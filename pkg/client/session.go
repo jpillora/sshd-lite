@@ -205,6 +205,11 @@ func (w *WebSocketSession) SetStderr(writer io.Writer) {
 
 // StartWebSocketProxy starts copying data between WebSocket and PTY
 func (w *WebSocketSession) StartWebSocketProxy() {
+	// Only start copying if we have a valid PTY
+	if w.ptySession == nil || w.ptySession.pty == nil {
+		return
+	}
+	
 	// Copy from PTY to WebSocket
 	go func() {
 		io.Copy(w.wsWriter, w.ptySession.pty)
