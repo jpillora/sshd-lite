@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/jpillora/opts"
@@ -19,6 +20,10 @@ type daemonConfig struct {
 }
 
 func (d *daemonConfig) Run() error {
+	if smux.IsDaemonRunning() {
+		fmt.Println("already running")
+		return nil
+	}
 	if d.Foreground {
 		return smux.RunDaemonProcess(true)
 	}
