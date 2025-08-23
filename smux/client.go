@@ -1,4 +1,4 @@
-package main
+package smux
 
 import (
 	"encoding/json"
@@ -10,27 +10,27 @@ import (
 	"github.com/jpillora/sshd-lite/server"
 )
 
-func runAttachCommand(sessionName string) error {
-	if !isDaemonRunning() {
+func AttachToSession(sessionName string) error {
+	if !IsDaemonRunning() {
 		log.Println("Daemon not running, starting in background...")
-		if err := startDaemonBackground(); err != nil {
+		if err := StartDaemonBackground(); err != nil {
 			return fmt.Errorf("failed to start daemon: %v", err)
 		}
 		// Give daemon time to start
 		for i := 0; i < 10; i++ {
 			time.Sleep(500 * time.Millisecond)
-			if isDaemonRunning() {
+			if IsDaemonRunning() {
 				break
 			}
 			log.Println("Waiting for daemon to start...")
 		}
-		if !isDaemonRunning() {
+		if !IsDaemonRunning() {
 			return fmt.Errorf("daemon failed to start")
 		}
 	}
 
 	c := client.NewClient()
-	if err := c.ConnectUnixSocket(defaultSocketPath); err != nil {
+	if err := c.ConnectUnixSocket(DefaultSocketPath); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %v", err)
 	}
 	defer c.Close()
@@ -44,9 +44,9 @@ func runAttachCommand(sessionName string) error {
 	return client.ReplaceTerminal(session)
 }
 
-func runListCommand() error {
+func ListSessions() error {
 	c := client.NewClient()
-	if err := c.ConnectUnixSocket(defaultSocketPath); err != nil {
+	if err := c.ConnectUnixSocket(DefaultSocketPath); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %v", err)
 	}
 	defer c.Close()

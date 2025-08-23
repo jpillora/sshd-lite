@@ -1,4 +1,4 @@
-package main
+package smux
 
 import (
 	"fmt"
@@ -12,13 +12,13 @@ import (
 )
 
 const (
-	defaultSocketPath = "/var/run/smux.sock"
-	defaultPIDPath    = "/var/run/smux.pid"
-	defaultLogPath    = "/var/run/smux.log"
+	DefaultSocketPath = "/var/run/smux.sock"
+	DefaultPIDPath    = "/var/run/smux.pid"
+	DefaultLogPath    = "/var/run/smux.log"
 )
 
-func isDaemonRunning() bool {
-	pidBytes, err := os.ReadFile(defaultPIDPath)
+func IsDaemonRunning() bool {
+	pidBytes, err := os.ReadFile(DefaultPIDPath)
 	if err != nil {
 		return false
 	}
@@ -37,8 +37,8 @@ func isDaemonRunning() bool {
 	return err == nil
 }
 
-func startDaemonBackground() error {
-	if isDaemonRunning() {
+func StartDaemonBackground() error {
+	if IsDaemonRunning() {
 		return fmt.Errorf("daemon already running")
 	}
 	
@@ -50,9 +50,9 @@ func startDaemonBackground() error {
 	return cmd.Start()
 }
 
-func runDaemonProcess(foreground bool) error {
+func RunDaemonProcess(foreground bool) error {
 	if !foreground {
-		logFile, err := os.OpenFile(defaultLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		logFile, err := os.OpenFile(DefaultLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %v", err)
 		}
@@ -60,13 +60,13 @@ func runDaemonProcess(foreground bool) error {
 		log.SetOutput(logFile)
 	}
 	
-	err := os.WriteFile(defaultPIDPath, []byte(strconv.Itoa(os.Getpid())), 0644)
+	err := os.WriteFile(DefaultPIDPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write PID file: %v", err)
 	}
-	defer os.Remove(defaultPIDPath)
+	defer os.Remove(DefaultPIDPath)
 	
-	os.Remove(defaultSocketPath)
+	os.Remove(DefaultSocketPath)
 	
 	config := &sshd.Config{
 		Shell:     "/bin/bash",
@@ -80,6 +80,6 @@ func runDaemonProcess(foreground bool) error {
 		return fmt.Errorf("failed to create server: %v", err)
 	}
 	
-	log.Printf("Starting daemon on %s", defaultSocketPath)
-	return server.StartUnixSocket(defaultSocketPath)
+	log.Printf("Starting daemon on %s", DefaultSocketPath)
+	return server.StartUnixSocket(DefaultSocketPath)
 }

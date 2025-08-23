@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/jpillora/opts"
+	"github.com/jpillora/sshd-lite/smux"
 )
 
 type config struct {
@@ -16,9 +17,9 @@ type daemonConfig struct {
 
 func (d *daemonConfig) Run() error {
 	if d.Foreground {
-		return runDaemonProcess(true)
+		return smux.RunDaemonProcess(true)
 	} else {
-		return startDaemonBackground()
+		return smux.StartDaemonBackground()
 	}
 }
 
@@ -27,13 +28,13 @@ type attachConfig struct {
 }
 
 func (a *attachConfig) Run() error {
-	return runAttachCommand(a.Session)
+	return smux.AttachToSession(a.Session)
 }
 
 type listConfig struct{}
 
 func (l *listConfig) Run() error {
-	return runListCommand()
+	return smux.ListSessions()
 }
 
 func main() {
