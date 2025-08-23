@@ -116,6 +116,7 @@
             
             <div class="new-session-form">
                 <input type="text" id="sessionName" placeholder="Session name (optional)" />
+                <input type="text" id="initialCommand" placeholder="Initial command (optional)" />
                 <button onclick="createSession()">Create New Session</button>
             </div>
             
@@ -183,22 +184,27 @@
 
         async function createSession() {
             const nameInput = document.getElementById('sessionName');
+            const commandInput = document.getElementById('initialCommand');
             const name = nameInput.value.trim();
+            const command = commandInput.value.trim();
             
             try {
+                const requestBody = {};
+                if (name) requestBody.name = name;
+                if (command) requestBody.command = command;
+                
                 const response = await fetch('/api/sessions/create', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        name: name || undefined
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (response.ok) {
                     const session = await response.json();
                     nameInput.value = '';
+                    commandInput.value = '';
                     updateStatus(`Created session: ${session.name}`);
                     refreshSessions();
                     

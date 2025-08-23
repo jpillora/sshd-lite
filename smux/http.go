@@ -44,6 +44,7 @@ func (hs *HTTPServer) setupRoutes() {
 	hs.mux.HandleFunc("/", hs.handleIndex)
 	hs.mux.HandleFunc("/api/sessions", hs.handleAPISessions)
 	hs.mux.HandleFunc("/api/sessions/create", hs.handleAPICreateSession)
+	hs.mux.HandleFunc("/api/sessions/new", hs.handleAPICreateSession) // Alias for create
 	hs.mux.HandleFunc("/attach/", hs.handleAttach)
 }
 
@@ -88,8 +89,9 @@ func (hs *HTTPServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 	}
 	
 	var req struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Command string `json:"command"`
 	}
 	
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -104,18 +106,32 @@ func (hs *HTTPServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 		req.Name = fmt.Sprintf("session-%s", req.ID[:8])
 	}
 	
-	session, err := hs.sessionManager.CreateSession(req.ID, req.Name)
+	var session *Session
+	var err error
+	
+	if req.Command != "" {
+		session, err = hs.sessionManager.CreateSessionWithCommand(req.ID, req.Name, req.Command)
+	} else {
+		session, err = hs.sessionManager.CreateSession(req.ID, req.Name)
+	}
+	
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	response := map[string]interface{}{
 		"id":         session.ID,
 		"name":       session.Name,
 		"start_time": session.StartTime.Format("2006-01-02 15:04:05"),
-	})
+	}
+	
+	if req.Command != "" {
+		response["command"] = req.Command
+	}
+	
+	json.NewEncoder(w).Encode(response)
 }
 
 func (hs *HTTPServer) handleAttach(w http.ResponseWriter, r *http.Request) {

@@ -164,3 +164,65 @@ func TestGenerateSessionID(t *testing.T) {
 		t.Errorf("Expected session ID length 8, got %d", len(id1))
 	}
 }
+
+func TestCreateSessionWithCommand(t *testing.T) {
+	sm := NewSessionManager()
+	
+	// Test creating a session with initial command
+	session, err := sm.CreateSessionWithCommand("test-cmd", "Test Command Session", "echo 'hello world'")
+	if err != nil {
+		t.Fatalf("Failed to create session with command: %v", err)
+	}
+	defer sm.RemoveSession("test-cmd")
+	
+	if session.ID != "test-cmd" {
+		t.Errorf("Expected session ID 'test-cmd', got '%s'", session.ID)
+	}
+	
+	if session.Name != "Test Command Session" {
+		t.Errorf("Expected session name 'Test Command Session', got '%s'", session.Name)
+	}
+	
+	// Give session time to start and process command
+	time.Sleep(200 * time.Millisecond)
+	
+	// Verify session is running
+	sessions := sm.ListSessions()
+	if len(sessions) != 1 {
+		t.Errorf("Expected 1 session, got %d", len(sessions))
+	}
+}
+
+func TestHTTPCreateSessionWithCommand(t *testing.T) {
+	sm := NewSessionManager()
+	server := NewHTTPServer(sm)
+	
+	// Test creating session with command via HTTP API
+	reqBody := strings.NewReader(`{"name":"HTTP Command Session","command":"ls -la"}`)
+	req := httptest.NewRequest("POST", "/api/sessions/create", reqBody)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.mux.ServeHTTP(w, req)
+	
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	
+	if response["name"] != "HTTP Command Session" {
+		t.Errorf("Expected session name 'HTTP Command Session', got '%v'", response["name"])
+	}
+	
+	if response["command"] != "ls -la" {
+		t.Errorf("Expected command 'ls -la', got '%v'", response["command"])
+	}
+	
+	// Clean up
+	if sessionID, ok := response["id"].(string); ok {
+		sm.RemoveSession(sessionID)
+	}
+}

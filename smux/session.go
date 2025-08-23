@@ -44,6 +44,10 @@ func NewSessionManager() *SessionManager {
 }
 
 func (sm *SessionManager) CreateSession(id, name string) (*Session, error) {
+	return sm.CreateSessionWithCommand(id, name, "")
+}
+
+func (sm *SessionManager) CreateSessionWithCommand(id, name, initialCommand string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -67,8 +71,20 @@ func (sm *SessionManager) CreateSession(id, name string) (*Session, error) {
 		return nil, fmt.Errorf("failed to start shell: %v", err)
 	}
 
+	// If there's an initial command, send it to the shell
+	if initialCommand != "" {
+		go func() {
+			// Give the shell a moment to start
+			time.Sleep(100 * time.Millisecond)
+			session.PTY.Write([]byte(initialCommand + "\n"))
+		}()
+	}
+
 	sm.sessions[id] = session
 	log.Printf("Created session %s (%s)", id, name)
+	if initialCommand != "" {
+		log.Printf("Session %s initial command: %s", id, initialCommand)
+	}
 	return session, nil
 }
 

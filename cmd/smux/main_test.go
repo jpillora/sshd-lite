@@ -22,4 +22,13 @@ func TestCLIStructures(t *testing.T) {
 	
 	// Test list config - no fields to test
 	_ = c.List
+	
+	// Test new config
+	newCmd := c.New
+	if newCmd.Name != "" {
+		t.Log("New command name defaults to empty string")
+	}
+	if newCmd.Command != "" {
+		t.Log("New command command defaults to empty string")
+	}
 }

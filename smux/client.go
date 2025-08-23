@@ -161,3 +161,77 @@ func createSession(name string) (string, error) {
 
 	return sessionID, nil
 }
+
+func CreateNewSession(sessionName, initialCommand string) error {
+	// Check if daemon is running on HTTP port
+	if !isHTTPDaemonRunning() {
+		log.Println("Daemon not running, starting in background...")
+		if err := StartDaemonBackground(); err != nil {
+			return fmt.Errorf("failed to start daemon: %v", err)
+		}
+		// Give daemon time to start
+		for i := 0; i < 10; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if isHTTPDaemonRunning() {
+				break
+			}
+			log.Println("Waiting for daemon to start...")
+		}
+		if !isHTTPDaemonRunning() {
+			return fmt.Errorf("daemon failed to start")
+		}
+	}
+
+	// Create session via API
+	sessionID, err := createSessionWithCommand(sessionName, initialCommand)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %v", err)
+	}
+
+	fmt.Printf("Created session: %s\n", sessionID)
+	fmt.Printf("WebUI: http://localhost:%d/attach/%s\n", HTTPPort, sessionID)
+	fmt.Printf("Or visit: http://localhost:%d\n", HTTPPort)
+
+	return nil
+}
+
+func createSessionWithCommand(name, command string) (string, error) {
+	reqBody := map[string]string{
+		"name": name,
+	}
+	
+	if command != "" {
+		reqBody["command"] = command
+	}
+	
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := http.Post(
+		fmt.Sprintf("http://localhost:%d/api/sessions/create", HTTPPort),
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to create session: %s", resp.Status)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	sessionID, ok := result["id"].(string)
+	if !ok {
+		return "", fmt.Errorf("invalid response format")
+	}
+
+	return sessionID, nil
+}

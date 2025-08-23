@@ -16,6 +16,32 @@ const (
 	DefaultLogPath    = "/var/run/smux.log"
 )
 
+func getPIDPath() string {
+	if isWritable("/var/run/") {
+		return DefaultPIDPath
+	}
+	return "/tmp/smux.pid"
+}
+
+func getLogPath() string {
+	if isWritable("/var/run/") {
+		return DefaultLogPath
+	}
+	return "/tmp/smux.log"
+}
+
+func isWritable(path string) bool {
+	// Test if we can create a file in the directory
+	testFile := path + ".smux_test"
+	file, err := os.Create(testFile)
+	if err != nil {
+		return false
+	}
+	file.Close()
+	os.Remove(testFile)
+	return true
+}
+
 type Daemon struct {
 	sessionManager *SessionManager
 	httpServer     *HTTPServer
@@ -33,7 +59,8 @@ func NewDaemon() *Daemon {
 }
 
 func IsDaemonRunning() bool {
-	pidBytes, err := os.ReadFile(DefaultPIDPath)
+	pidPath := getPIDPath()
+	pidBytes, err := os.ReadFile(pidPath)
 	if err != nil {
 		return false
 	}
@@ -66,8 +93,11 @@ func StartDaemonBackground() error {
 }
 
 func RunDaemonProcess(foreground bool) error {
+	pidPath := getPIDPath()
+	
 	if !foreground {
-		logFile, err := os.OpenFile(DefaultLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		logPath := getLogPath()
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %v", err)
 		}
@@ -75,11 +105,11 @@ func RunDaemonProcess(foreground bool) error {
 		log.SetOutput(logFile)
 	}
 	
-	err := os.WriteFile(DefaultPIDPath, []byte(strconv.Itoa(os.Getpid())), 0644)
+	err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write PID file: %v", err)
 	}
-	defer os.Remove(DefaultPIDPath)
+	defer os.Remove(pidPath)
 	
 	daemon := NewDaemon()
 	
