@@ -290,7 +290,7 @@ func generateSessionID() string {
 func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-chan []byte) error {
 	sessionID := generateSessionID()
 	
-	shell := exec.Command("/bin/bash")
+	shell := exec.Command(s.config.Shell)
 	shell.Env = env
 	s.debugf("Session env: %v", env)
 
