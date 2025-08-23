@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/jpillora/sshd-lite/client"
+	"github.com/jpillora/sshd-lite/pkg/client"
 )
 
 //go:embed static/index.html

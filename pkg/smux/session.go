@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/jpillora/sshd-lite/client"
+	"github.com/jpillora/sshd-lite/pkg/client"
 )
 
 type Session struct {

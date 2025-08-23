@@ -1,8 +1,10 @@
 package main
 
 import (
+	"os"
+
 	"github.com/jpillora/opts"
-	"github.com/jpillora/sshd-lite/smux"
+	"github.com/jpillora/sshd-lite/pkg/smux"
 )
 
 type config struct {
@@ -19,9 +21,8 @@ type daemonConfig struct {
 func (d *daemonConfig) Run() error {
 	if d.Foreground {
 		return smux.RunDaemonProcess(true)
-	} else {
-		return smux.StartDaemonBackground()
 	}
+	return smux.StartDaemonBackground()
 }
 
 type attachConfig struct {
@@ -49,5 +50,10 @@ func (n *newConfig) Run() error {
 
 func main() {
 	c := config{}
-	opts.Parse(&c).Run()
+	o := opts.New(&c).Name("smux").Parse()
+	if !o.IsRunnable() {
+		println(o.Help())
+		os.Exit(0)
+	}
+	o.RunFatal()
 }

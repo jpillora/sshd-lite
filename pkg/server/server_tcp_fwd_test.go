@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	sshd "github.com/jpillora/sshd-lite/server"
+	sshd "github.com/jpillora/sshd-lite/pkg/server"
 )
 
 var tcpForwardingLocal = testCase{

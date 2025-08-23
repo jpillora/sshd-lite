@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	sshd "github.com/jpillora/sshd-lite/server"
+	sshd "github.com/jpillora/sshd-lite/pkg/server"
 )
 
 var version string = "0.0.0-src" //set via ldflags
