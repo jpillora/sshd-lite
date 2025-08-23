@@ -145,11 +145,11 @@ func TestSessionResize(t *testing.T) {
 
 func TestGenerateSessionID(t *testing.T) {
 	id1 := generateSessionID()
-	time.Sleep(1 * time.Millisecond) // Ensure different timestamps
+	time.Sleep(10 * time.Millisecond) // Ensure different timestamps
 	id2 := generateSessionID()
 	
 	if id1 == id2 {
-		t.Error("Generated session IDs should be unique")
+		t.Errorf("Generated session IDs should be unique, got %s and %s", id1, id2)
 	}
 	
 	if len(id1) != 8 {
