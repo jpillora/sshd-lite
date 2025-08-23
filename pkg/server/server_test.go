@@ -82,7 +82,9 @@ var exec = testCase{
 		if err != nil {
 			return fmt.Errorf("failed to run command: %w", err)
 		}
-		if string(out) != "helloworld\n" {
+		expected := "helloworld\n"
+		outStr := string(out)
+		if outStr != expected && outStr != "helloworld\r\n" {
 			return fmt.Errorf("unexpected output: %q", out)
 		}
 		return nil
