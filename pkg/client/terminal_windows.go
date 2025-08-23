@@ -1,10 +1,10 @@
+//go:build windows
+
 package client
 
 import (
 	"io"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
@@ -40,16 +40,7 @@ func ReplaceTerminalWithSession(session TerminalSession) error {
 		session.SetStdout(stdout)
 		session.SetStderr(stderr)
 
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGWINCH)
-		go func() {
-			for range sigCh {
-				w, h, err := term.GetSize(int(stdin.Fd()))
-				if err == nil {
-					session.WindowChange(h, w)
-				}
-			}
-		}()
+		// Windows doesn't have SIGWINCH, so we skip window change handling
 	} else {
 		session.SetStdin(stdin)
 		session.SetStdout(stdout)
