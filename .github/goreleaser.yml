@@ -2,7 +2,39 @@
 #   goreleaser release --config goreleaser.yml --clean --skip publish
 version: 2
 builds:
-  - env:
+  - id: sshd-lite
+    main: ./cmd/sshd-lite
+    binary: sshd-lite
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - linux
+      - darwin
+      - windows
+      - openbsd
+    goarch:
+      - 386
+      - amd64
+      - arm
+      - arm64
+      - ppc64
+      - ppc64le
+      - mips
+      - mipsle
+      - mips64
+      - mips64le
+      - s390x
+    goarm:
+      - '6'
+      - '7'
+  - id: smux
+    main: ./cmd/smux
+    binary: smux
+    env:
       - CGO_ENABLED=0
     flags:
       - -trimpath

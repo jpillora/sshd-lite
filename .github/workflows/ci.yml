@@ -24,8 +24,12 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
           check-latest: true
-      - name: Build
-        run: go build -v -o /dev/null .
+      - name: Test
+        run: go test -v ./...
+      - name: Build sshd-lite
+        run: go build -v -o /dev/null ./cmd/sshd-lite
+      - name: Build smux
+        run: go build -v -o /dev/null ./cmd/smux
   # ================
   # RELEASE BINARIES (on push "v*" tag)
   # ================
