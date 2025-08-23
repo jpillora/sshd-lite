@@ -9,3 +9,5 @@
 * check the code compiles with `go build -v -o /dev/null <package>`
 * test the code with `go test -v <package>`
 * write tests to confirm each step of the plan is working correctly
+* prefer early returns
+* no `else { return <expr> }`, drop the `else`
