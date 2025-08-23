@@ -9,6 +9,7 @@ type config struct {
 	Daemon daemonConfig `opts:"mode=cmd,help=Run SSH daemon on Unix socket"`
 	Attach attachConfig `opts:"mode=cmd,help=Attach to a shell session"`
 	List   listConfig   `opts:"mode=cmd,help=List active shell sessions"`
+	New    newConfig    `opts:"mode=cmd,help=Create a new bash session"`
 }
 
 type daemonConfig struct {
@@ -35,6 +36,15 @@ type listConfig struct{}
 
 func (l *listConfig) Run() error {
 	return smux.ListSessions()
+}
+
+type newConfig struct {
+	Name    string `opts:"help=session name (optional)"`
+	Command string `opts:"help=initial command to run (optional)"`
+}
+
+func (n *newConfig) Run() error {
+	return smux.CreateNewSession(n.Name, n.Command)
 }
 
 func main() {
