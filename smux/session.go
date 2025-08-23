@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/jpillora/sshd-lite/client"
 )
 
 type Session struct {
@@ -202,4 +203,12 @@ func (s *Session) Resize(rows, cols int) error {
 		Rows: uint16(rows),
 		Cols: uint16(cols),
 	})
+}
+
+func (s *Session) GetPTY() pty.Pty {
+	return s.PTY
+}
+
+func (s *Session) GetPTYSession() *client.PTYSession {
+	return client.NewPTYSession(s.PTY)
 }

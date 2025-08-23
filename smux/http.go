@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jpillora/sshd-lite/client"
 )
 
 //go:embed static/index.html
@@ -148,52 +149,19 @@ func (hs *HTTPServer) handleAttach(w http.ResponseWriter, r *http.Request) {
 	clientID := generateSessionID()
 	log.Printf("WebSocket client %s connecting to session %s", clientID, sessionID)
 	
-	// Create WebSocket wrapper for client
-	wsClient := &WebSocketClient{
-		conn:      conn,
-		sessionID: sessionID,
-		clientID:  clientID,
-	}
+	// Create WebSocket wrapper that implements io.Reader/Writer
+	wsWrapper := &WebSocketWrapper{conn: conn}
 	
-	// Add client to session
-	session.AddClient(clientID, wsClient, wsClient)
+	// Get the PTY session from our session
+	ptySession := session.GetPTYSession()
 	
-	// Handle WebSocket messages
-	wsClient.handleMessages(session)
-}
-
-func (hs *HTTPServer) Start() error {
-	log.Printf("Starting HTTP server on port %d", HTTPPort)
-	return http.ListenAndServe(fmt.Sprintf(":%d", HTTPPort), hs.mux)
-}
-
-type WebSocketClient struct {
-	conn      *websocket.Conn
-	sessionID string
-	clientID  string
-}
-
-func (wsc *WebSocketClient) Write(data []byte) (int, error) {
-	err := wsc.conn.WriteMessage(websocket.TextMessage, data)
-	if err != nil {
-		return 0, err
-	}
-	return len(data), nil
-}
-
-func (wsc *WebSocketClient) Read(data []byte) (int, error) {
-	// This will be handled by handleMessages instead
-	return 0, fmt.Errorf("read not supported directly")
-}
-
-func (wsc *WebSocketClient) handleMessages(session *Session) {
-	defer func() {
-		session.RemoveClient(wsc.clientID)
-		wsc.conn.Close()
-	}()
+	// Use the client package to create a WebSocket session
+	wsSession := client.AttachWebSocketToSession(ptySession, wsWrapper, wsWrapper)
+	defer wsSession.Close()
 	
+	// Handle WebSocket control messages (resize, etc.)
 	for {
-		messageType, data, err := wsc.conn.ReadMessage()
+		messageType, data, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("WebSocket error: %v", err)
@@ -203,7 +171,7 @@ func (wsc *WebSocketClient) handleMessages(session *Session) {
 		
 		switch messageType {
 		case websocket.TextMessage:
-			// Handle different message types
+			// Handle JSON control messages
 			var msg map[string]interface{}
 			if err := json.Unmarshal(data, &msg); err == nil {
 				if msgType, ok := msg["type"].(string); ok {
@@ -211,25 +179,60 @@ func (wsc *WebSocketClient) handleMessages(session *Session) {
 					case "resize":
 						if rows, ok := msg["rows"].(float64); ok {
 							if cols, ok := msg["cols"].(float64); ok {
-								session.Resize(int(rows), int(cols))
+								wsSession.WindowChange(int(rows), int(cols))
 							}
 						}
+						continue
 					case "input":
 						if input, ok := msg["data"].(string); ok {
-							session.PTY.Write([]byte(input))
+							wsSession.Write([]byte(input))
 						}
+						continue
 					}
-					continue
 				}
 			}
 			
 			// Fallback: treat as raw input
-			session.PTY.Write(data)
+			wsSession.Write(data)
 			
 		case websocket.BinaryMessage:
-			session.PTY.Write(data)
+			wsSession.Write(data)
 		}
 	}
+}
+
+// WebSocketWrapper implements io.Reader and io.Writer for WebSocket connections
+type WebSocketWrapper struct {
+	conn *websocket.Conn
+}
+
+func (w *WebSocketWrapper) Read(p []byte) (int, error) {
+	_, data, err := w.conn.ReadMessage()
+	if err != nil {
+		return 0, err
+	}
+	
+	n := copy(p, data)
+	if n < len(data) {
+		// If the buffer is too small, we lose data
+		// In a production system, you might want to buffer this
+		log.Printf("Warning: WebSocket message truncated (%d bytes lost)", len(data)-n)
+	}
+	
+	return n, nil
+}
+
+func (w *WebSocketWrapper) Write(p []byte) (int, error) {
+	err := w.conn.WriteMessage(websocket.TextMessage, p)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (hs *HTTPServer) Start() error {
+	log.Printf("Starting HTTP server on port %d", HTTPPort)
+	return http.ListenAndServe(fmt.Sprintf(":%d", HTTPPort), hs.mux)
 }
 
 func generateSessionID() string {

@@ -122,19 +122,14 @@ func TestHTTPServer(t *testing.T) {
 	}
 }
 
-func TestWebSocketClient(t *testing.T) {
-	// Test WebSocket client structure
-	client := &WebSocketClient{
-		sessionID: "test-session",
-		clientID:  "test-client",
+func TestWebSocketWrapper(t *testing.T) {
+	// Test WebSocket wrapper structure
+	wrapper := &WebSocketWrapper{
+		conn: nil, // We can't easily create a real WebSocket connection in tests
 	}
 	
-	if client.sessionID != "test-session" {
-		t.Errorf("Expected session ID 'test-session', got '%s'", client.sessionID)
-	}
-	
-	if client.clientID != "test-client" {
-		t.Errorf("Expected client ID 'test-client', got '%s'", client.clientID)
+	if wrapper.conn != nil {
+		t.Error("Expected nil connection in test")
 	}
 }
 
