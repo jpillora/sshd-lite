@@ -1,7 +1,9 @@
 package sshd
 
 import (
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -21,11 +23,15 @@ type Server struct {
 	config               *Config
 	sshConfig            *ssh.ServerConfig
 	tcpForwardingHandler *TCPForwardingHandler
+	sessionManager       *SessionManager
 }
 
 // NewServer creates a new Server
 func NewServer(c *Config) (*Server, error) {
-	s := &Server{config: c}
+	s := &Server{
+		config:         c,
+		sessionManager: NewSessionManager(),
+	}
 	sc, err := s.computeSSHConfig()
 	if err != nil {
 		return nil, err
@@ -193,6 +199,9 @@ func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Req
 			if !s.config.IgnoreEnv {
 				env = appendEnv(env, kv)
 			}
+		case "list":
+			data, err := s.sessionManager.GetSessionsJSON()
+			req.Reply(err == nil, data)
 		case "shell":
 			// Responding true (OK) here will let the client
 			// know we have attached the shell (pty) to the connection
@@ -272,12 +281,21 @@ func (s *Server) keepAlive(connection ssh.Channel, interval time.Duration, ticki
 	}
 }
 
+func generateSessionID() string {
+	bytes := make([]byte, 8)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+}
+
 func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-chan []byte) error {
-	shell := exec.Command(s.config.Shell)
+	sessionID := generateSessionID()
+	
+	shell := exec.Command("/bin/bash")
 	shell.Env = env
 	s.debugf("Session env: %v", env)
 
 	close := func() {
+		s.sessionManager.RemoveSession(sessionID)
 		connection.Close()
 		if shell.Process != nil {
 			// Use Signal instead of Wait to avoid blocking if process already exited
@@ -297,6 +315,11 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 	if err != nil {
 		close()
 		return fmt.Errorf("could not start pty (%s)", err)
+	}
+	
+	// Add session to session manager
+	if shell.Process != nil {
+		s.sessionManager.AddSession(sessionID, "bash", shell.Process.Pid)
 	}
 	//dequeue resizes
 	go func() {

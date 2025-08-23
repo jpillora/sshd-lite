@@ -45,37 +45,37 @@ Build a terminal multiplexer using SSH protocol with daemon/client architecture 
 
 ## TODO List
 
-- [ ] Setup CLI framework with jpillora/opts
-  - [ ] Add jpillora/opts dependency to go.mod
-  - [ ] Create basic CLI structure with daemon, attach, list subcommands
-  - [ ] Add --foreground flag to daemon command
-- [ ] Create client package for SSH connections
-  - [ ] Implement SSH client for Unix socket connections
-  - [ ] Add PTY handling and terminal replacement functions
-  - [ ] Add connection utilities for `/var/run/smux.sock`
-- [ ] Extend server package for Unix socket support
-  - [ ] Add Unix socket listener capability
-  - [ ] Add session tracking data structures
-  - [ ] Implement custom SSH request handler for "list" command
-  - [ ] Force bash shells for all sessions
-- [ ] Implement daemon command
-  - [ ] Add PID file handling at `/var/run/smux.pid`
-  - [ ] Implement background/foreground mode switching
-  - [ ] Add log output routing (stdout vs `/var/run/smux.log`)
-  - [ ] Start SSH server on Unix socket
-- [ ] Implement attach command
-  - [ ] Add daemon detection (PID file + process check)
-  - [ ] Add auto-start daemon functionality
-  - [ ] Connect to Unix socket and request shell session
-  - [ ] Replace current terminal with remote PTY
-- [ ] Implement list command
-  - [ ] Connect to daemon via SSH
-  - [ ] Send "list" SSH request with want-reply:true
-  - [ ] Parse and display JSON response
-- [ ] Add comprehensive session management
-  - [ ] Named shell session tracking
-  - [ ] Session creation/termination handling
-  - [ ] JSON serialization for session data
+- [x] Setup CLI framework with jpillora/opts
+  - [x] Add jpillora/opts dependency to go.mod
+  - [x] Create basic CLI structure with daemon, attach, list subcommands
+  - [x] Add --foreground flag to daemon command
+- [x] Create client package for SSH connections
+  - [x] Implement SSH client for Unix socket connections
+  - [x] Add PTY handling and terminal replacement functions
+  - [x] Add connection utilities for `/var/run/smux.sock`
+- [x] Extend server package for Unix socket support
+  - [x] Add Unix socket listener capability
+  - [x] Add session tracking data structures
+  - [x] Implement custom SSH request handler for "list" command
+  - [x] Force bash shells for all sessions
+- [x] Implement daemon command
+  - [x] Add PID file handling at `/var/run/smux.pid`
+  - [x] Implement background/foreground mode switching
+  - [x] Add log output routing (stdout vs `/var/run/smux.log`)
+  - [x] Start SSH server on Unix socket
+- [x] Implement attach command
+  - [x] Add daemon detection (PID file + process check)
+  - [x] Add auto-start daemon functionality
+  - [x] Connect to Unix socket and request shell session
+  - [x] Replace current terminal with remote PTY
+- [x] Implement list command
+  - [x] Connect to daemon via SSH
+  - [x] Send "list" SSH request with want-reply:true
+  - [x] Parse and display JSON response
+- [x] Add comprehensive session management
+  - [x] Named shell session tracking
+  - [x] Session creation/termination handling
+  - [x] JSON serialization for session data
 
 ## Implementation Steps
 
