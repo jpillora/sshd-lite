@@ -94,7 +94,7 @@ func ListSessions() error {
 	return nil
 }
 
-type SessionInfo struct {
+type sessionInfo struct {
 	ID          string `json:"id"`
 	StartTime   string `json:"start_time"`
 	ClientCount int    `json:"client_count"`
@@ -109,14 +109,14 @@ func isHTTPDaemonRunning() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func getSessionList() ([]SessionInfo, error) {
+func getSessionList() ([]sessionInfo, error) {
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/sessions", HTTPPort))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var sessions []SessionInfo
+	var sessions []sessionInfo
 	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
 		return nil, err
 	}

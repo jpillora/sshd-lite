@@ -11,45 +11,45 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/jpillora/sshd-lite/pkg/client"
+	sshclient "github.com/jpillora/sshd-lite/pkg/client"
 )
 
-type Session struct {
+type session struct {
 	ID        string
 	StartTime time.Time
 	Command   *exec.Cmd
 	PTY       pty.Pty
-	clients   map[string]*Client
+	clients   map[string]*sessionClient
 	mu        sync.RWMutex
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
 
-type Client struct {
+type sessionClient struct {
 	ID     string
 	Writer io.Writer
 	Reader io.Reader
 }
 
-func newSession(id string) *Session {
+func newSession(id string) *session {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Session{
+	return &session{
 		ID:        id,
 		StartTime: time.Now(),
-		clients:   make(map[string]*Client),
+		clients:   make(map[string]*sessionClient),
 		ctx:       ctx,
 		cancel:    cancel,
 	}
 }
 
-func (s *Session) executeInitialCommand(initialCommand string) {
+func (s *session) executeInitialCommand(initialCommand string) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		s.PTY.Write([]byte(initialCommand + "\n"))
 	}()
 }
 
-func (s *Session) startShell() error {
+func (s *session) startShell() error {
 	s.Command = exec.Command("/bin/bash")
 	s.Command.Env = os.Environ()
 
@@ -63,7 +63,7 @@ func (s *Session) startShell() error {
 	return nil
 }
 
-func (s *Session) monitor() {
+func (s *session) monitor() {
 	defer func() {
 		s.terminate()
 	}()
@@ -73,7 +73,7 @@ func (s *Session) monitor() {
 	}
 }
 
-func (s *Session) terminate() {
+func (s *session) terminate() {
 	s.cancel()
 	
 	s.mu.Lock()
@@ -92,11 +92,11 @@ func (s *Session) terminate() {
 	}
 }
 
-func (s *Session) AddClient(clientID string, writer io.Writer, reader io.Reader) {
+func (s *session) AddClient(clientID string, writer io.Writer, reader io.Reader) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	client := &Client{
+	client := &sessionClient{
 		ID:     clientID,
 		Writer: writer,
 		Reader: reader,
@@ -108,7 +108,7 @@ func (s *Session) AddClient(clientID string, writer io.Writer, reader io.Reader)
 	go s.handleClient(client)
 }
 
-func (s *Session) RemoveClient(clientID string) {
+func (s *session) RemoveClient(clientID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -118,7 +118,7 @@ func (s *Session) RemoveClient(clientID string) {
 	}
 }
 
-func (s *Session) handleClient(client *Client) {
+func (s *session) handleClient(client *sessionClient) {
 	defer s.RemoveClient(client.ID)
 
 	go func() {
@@ -128,13 +128,13 @@ func (s *Session) handleClient(client *Client) {
 	io.Copy(s.PTY, client.Reader)
 }
 
-func (s *Session) GetClientCount() int {
+func (s *session) GetClientCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.clients)
 }
 
-func (s *Session) Resize(rows, cols int) error {
+func (s *session) Resize(rows, cols int) error {
 	if s.PTY == nil {
 		return fmt.Errorf("no PTY available")
 	}
@@ -144,10 +144,10 @@ func (s *Session) Resize(rows, cols int) error {
 	})
 }
 
-func (s *Session) GetPTY() pty.Pty {
+func (s *session) GetPTY() pty.Pty {
 	return s.PTY
 }
 
-func (s *Session) GetPTYSession() *client.PTYSession {
-	return client.NewPTYSession(s.PTY)
+func (s *session) GetPTYSession() *sshclient.PTYSession {
+	return sshclient.NewPTYSession(s.PTY)
 }
