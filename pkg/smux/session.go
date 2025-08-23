@@ -16,7 +16,6 @@ import (
 
 type Session struct {
 	ID        string
-	Name      string
 	StartTime time.Time
 	Command   *exec.Cmd
 	PTY       pty.Pty
@@ -32,11 +31,10 @@ type Client struct {
 	Reader io.Reader
 }
 
-func newSession(id, name string) *Session {
+func newSession(id string) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Session{
 		ID:        id,
-		Name:      name,
 		StartTime: time.Now(),
 		clients:   make(map[string]*Client),
 		ctx:       ctx,

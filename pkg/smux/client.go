@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func AttachToSession(sessionName string) error {
+func AttachToSession(sessionID string) error {
 	// Check if daemon is running on HTTP port
 	if !isHTTPDaemonRunning() {
 		log.Println("Daemon not running, starting in background...")
@@ -37,13 +37,13 @@ func AttachToSession(sessionName string) error {
 
 	// Find or create session
 	var targetSessionID string
-	if sessionName == "" {
-		sessionName = "default"
+	if sessionID == "" {
+		sessionID = "1"
 	}
 
-	// Look for existing session by name
+	// Look for existing session by ID
 	for _, session := range sessions {
-		if session.Name == sessionName {
+		if session.ID == sessionID {
 			targetSessionID = session.ID
 			break
 		}
@@ -51,11 +51,11 @@ func AttachToSession(sessionName string) error {
 
 	// If no session found, create one
 	if targetSessionID == "" {
-		sessionID, err := createSession(sessionName)
+		sessionIDResult, err := createSession(sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to create session: %v", err)
 		}
-		targetSessionID = sessionID
+		targetSessionID = sessionIDResult
 	}
 
 	// Open browser to the session
@@ -86,8 +86,8 @@ func ListSessions() error {
 
 	fmt.Printf("Active sessions (%d):\n", len(sessions))
 	for _, session := range sessions {
-		fmt.Printf("  %s: %s (%d clients, started: %s)\n",
-			session.ID, session.Name, session.ClientCount, session.StartTime)
+		fmt.Printf("  %s (%d clients, started: %s)\n",
+			session.ID, session.ClientCount, session.StartTime)
 	}
 	fmt.Printf("\nWebUI available at: http://localhost:%d\n", HTTPPort)
 
@@ -96,7 +96,6 @@ func ListSessions() error {
 
 type SessionInfo struct {
 	ID          string `json:"id"`
-	Name        string `json:"name"`
 	StartTime   string `json:"start_time"`
 	ClientCount int    `json:"client_count"`
 }
@@ -125,9 +124,10 @@ func getSessionList() ([]SessionInfo, error) {
 	return sessions, nil
 }
 
-func createSession(name string) (string, error) {
-	reqBody := map[string]string{
-		"name": name,
+func createSession(id string) (string, error) {
+	reqBody := map[string]string{}
+	if id != "" {
+		reqBody["id"] = id
 	}
 	
 	jsonData, err := json.Marshal(reqBody)
@@ -162,7 +162,7 @@ func createSession(name string) (string, error) {
 	return sessionID, nil
 }
 
-func CreateNewSession(sessionName, initialCommand string) error {
+func CreateNewSession(sessionID, initialCommand string) error {
 	// Check if daemon is running on HTTP port
 	if !isHTTPDaemonRunning() {
 		log.Println("Daemon not running, starting in background...")
@@ -183,21 +183,22 @@ func CreateNewSession(sessionName, initialCommand string) error {
 	}
 
 	// Create session via API
-	sessionID, err := createSessionWithCommand(sessionName, initialCommand)
+	sessionIDResult, err := createSessionWithCommand(sessionID, initialCommand)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %v", err)
 	}
 
-	fmt.Printf("Created session: %s\n", sessionID)
-	fmt.Printf("WebUI: http://localhost:%d/attach/%s\n", HTTPPort, sessionID)
+	fmt.Printf("Created session: %s\n", sessionIDResult)
+	fmt.Printf("WebUI: http://localhost:%d/attach/%s\n", HTTPPort, sessionIDResult)
 	fmt.Printf("Or visit: http://localhost:%d\n", HTTPPort)
 
 	return nil
 }
 
-func createSessionWithCommand(name, command string) (string, error) {
-	reqBody := map[string]string{
-		"name": name,
+func createSessionWithCommand(id, command string) (string, error) {
+	reqBody := map[string]string{}
+	if id != "" {
+		reqBody["id"] = id
 	}
 	
 	if command != "" {

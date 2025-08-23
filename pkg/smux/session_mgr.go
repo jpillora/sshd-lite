@@ -3,6 +3,7 @@ package smux
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
 )
 
@@ -17,33 +18,44 @@ func NewSessionManager() *SessionManager {
 	}
 }
 
-func (sm *SessionManager) CreateSession(id, name string) (*Session, error) {
-	return sm.CreateSessionWithCommand(id, name, "")
+func (sm *SessionManager) nextAvailableID() string {
+	for i := 1; ; i++ {
+		id := strconv.Itoa(i)
+		if _, exists := sm.sessions[id]; !exists {
+			return id
+		}
+	}
 }
 
-func (sm *SessionManager) CreateSessionWithCommand(id, name, initialCommand string) (*Session, error) {
+func (sm *SessionManager) CreateSession(id string) (*Session, error) {
+	return sm.CreateSessionWithCommand(id, "")
+}
+
+func (sm *SessionManager) CreateSessionWithCommand(id, initialCommand string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	if id == "" {
+		id = sm.nextAvailableID()
+	}
 
 	if _, exists := sm.sessions[id]; exists {
 		return nil, fmt.Errorf("session %s already exists", id)
 	}
 
-	session := newSession(id, name)
+	session := newSession(id)
 
-	// Start the shell process
 	if err := session.startShell(); err != nil {
 		session.cancel()
 		return nil, fmt.Errorf("failed to start shell: %v", err)
 	}
 
-	// If there's an initial command, send it to the shell
 	if initialCommand != "" {
 		session.executeInitialCommand(initialCommand)
 	}
 
 	sm.sessions[id] = session
-	log.Printf("Created session %s (%s)", id, name)
+	log.Printf("Created session %s", id)
 	if initialCommand != "" {
 		log.Printf("Session %s initial command: %s", id, initialCommand)
 	}
