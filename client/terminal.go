@@ -1,6 +1,7 @@
 package client
 
 import (
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,11 @@ import (
 )
 
 func ReplaceTerminal(session *ssh.Session) error {
+	termSession := NewSSHSession(session)
+	return ReplaceTerminalWithSession(termSession)
+}
+
+func ReplaceTerminalWithSession(session TerminalSession) error {
 	stdin := os.Stdin
 	stdout := os.Stdout
 	stderr := os.Stderr
@@ -30,9 +36,9 @@ func ReplaceTerminal(session *ssh.Session) error {
 			return err
 		}
 
-		session.Stdin = stdin
-		session.Stdout = stdout
-		session.Stderr = stderr
+		session.SetStdin(stdin)
+		session.SetStdout(stdout)
+		session.SetStderr(stderr)
 
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGWINCH)
@@ -45,10 +51,17 @@ func ReplaceTerminal(session *ssh.Session) error {
 			}
 		}()
 	} else {
-		session.Stdin = stdin
-		session.Stdout = stdout
-		session.Stderr = stderr
+		session.SetStdin(stdin)
+		session.SetStdout(stdout)
+		session.SetStderr(stderr)
 	}
 
 	return session.Shell()
+}
+
+// AttachWebSocketToSession connects a WebSocket to a PTY session
+func AttachWebSocketToSession(ptySession *PTYSession, wsReader io.Reader, wsWriter io.Writer) *WebSocketSession {
+	wsSession := NewWebSocketSession(ptySession, wsReader, wsWriter)
+	wsSession.StartWebSocketProxy()
+	return wsSession
 }
