@@ -115,7 +115,7 @@ func RunDaemonProcess(foreground bool) error {
 	
 	// Create a default session
 	log.Println("Creating default session")
-	daemon.sessionManager.CreateSession("default", "Default Shell")
+	daemon.sessionManager.CreateSession("")
 	
 	log.Printf("Starting HTTP server on port %d", HTTPPort)
 	return daemon.httpServer.Start()

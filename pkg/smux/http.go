@@ -51,7 +51,6 @@ func (hs *HTTPServer) handleAPISessions(w http.ResponseWriter, r *http.Request) 
 	
 	type sessionInfo struct {
 		ID          string `json:"id"`
-		Name        string `json:"name"`
 		StartTime   string `json:"start_time"`
 		ClientCount int    `json:"client_count"`
 	}
@@ -60,7 +59,6 @@ func (hs *HTTPServer) handleAPISessions(w http.ResponseWriter, r *http.Request) 
 	for _, session := range sessions {
 		sessionList = append(sessionList, sessionInfo{
 			ID:          session.ID,
-			Name:        session.Name,
 			StartTime:   session.StartTime.Format("2006-01-02 15:04:05"),
 			ClientCount: session.GetClientCount(),
 		})
@@ -78,7 +76,6 @@ func (hs *HTTPServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 	
 	var req struct {
 		ID      string `json:"id"`
-		Name    string `json:"name"`
 		Command string `json:"command"`
 	}
 	
@@ -90,17 +87,14 @@ func (hs *HTTPServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 	if req.ID == "" {
 		req.ID = generateSessionID()
 	}
-	if req.Name == "" {
-		req.Name = fmt.Sprintf("session-%s", req.ID[:8])
-	}
 	
 	var session *Session
 	var err error
 	
 	if req.Command != "" {
-		session, err = hs.sessionManager.CreateSessionWithCommand(req.ID, req.Name, req.Command)
+		session, err = hs.sessionManager.CreateSessionWithCommand(req.ID, req.Command)
 	} else {
-		session, err = hs.sessionManager.CreateSession(req.ID, req.Name)
+		session, err = hs.sessionManager.CreateSession(req.ID)
 	}
 	
 	if err != nil {
@@ -111,7 +105,6 @@ func (hs *HTTPServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]any{
 		"id":         session.ID,
-		"name":       session.Name,
 		"start_time": session.StartTime.Format("2006-01-02 15:04:05"),
 	}
 	

@@ -13,17 +13,13 @@ func TestNewSessionManager(t *testing.T) {
 	sm := NewSessionManager()
 	
 	// Test creating a session
-	session, err := sm.CreateSession("test-id", "Test Session")
+	session, err := sm.CreateSession("test-id")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 	
 	if session.ID != "test-id" {
 		t.Errorf("Expected session ID 'test-id', got '%s'", session.ID)
-	}
-	
-	if session.Name != "Test Session" {
-		t.Errorf("Expected session name 'Test Session', got '%s'", session.Name)
 	}
 	
 	// Test getting session
@@ -55,7 +51,7 @@ func TestHTTPServer(t *testing.T) {
 	server := NewHTTPServer(sm)
 	
 	// Create a test session
-	session, err := sm.CreateSession("test-session", "Test Session")
+	session, err := sm.CreateSession("test-session")
 	if err != nil {
 		t.Fatalf("Failed to create test session: %v", err)
 	}
@@ -96,7 +92,7 @@ func TestHTTPServer(t *testing.T) {
 	}
 	
 	// Test create session API
-	reqBody := strings.NewReader(`{"name":"New Session"}`)
+	reqBody := strings.NewReader(`{}`)
 	req = httptest.NewRequest("POST", "/api/sessions/create", reqBody)
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
@@ -109,10 +105,6 @@ func TestHTTPServer(t *testing.T) {
 	var createResponse map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&createResponse); err != nil {
 		t.Fatalf("Failed to decode create response: %v", err)
-	}
-	
-	if createResponse["name"] != "New Session" {
-		t.Errorf("Expected session name 'New Session', got '%v'", createResponse["name"])
 	}
 	
 	// Clean up
@@ -135,7 +127,7 @@ func TestWebSocketWrapper(t *testing.T) {
 
 func TestSessionResize(t *testing.T) {
 	sm := NewSessionManager()
-	session, err := sm.CreateSession("resize-test", "Resize Test")
+	session, err := sm.CreateSession("resize-test")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -169,7 +161,7 @@ func TestCreateSessionWithCommand(t *testing.T) {
 	sm := NewSessionManager()
 	
 	// Test creating a session with initial command
-	session, err := sm.CreateSessionWithCommand("test-cmd", "Test Command Session", "echo 'hello world'")
+	session, err := sm.CreateSessionWithCommand("test-cmd", "echo 'hello world'")
 	if err != nil {
 		t.Fatalf("Failed to create session with command: %v", err)
 	}
@@ -177,10 +169,6 @@ func TestCreateSessionWithCommand(t *testing.T) {
 	
 	if session.ID != "test-cmd" {
 		t.Errorf("Expected session ID 'test-cmd', got '%s'", session.ID)
-	}
-	
-	if session.Name != "Test Command Session" {
-		t.Errorf("Expected session name 'Test Command Session', got '%s'", session.Name)
 	}
 	
 	// Give session time to start and process command
@@ -198,7 +186,7 @@ func TestHTTPCreateSessionWithCommand(t *testing.T) {
 	server := NewHTTPServer(sm)
 	
 	// Test creating session with command via HTTP API
-	reqBody := strings.NewReader(`{"name":"HTTP Command Session","command":"ls -la"}`)
+	reqBody := strings.NewReader(`{"command":"ls -la"}`)
 	req := httptest.NewRequest("POST", "/api/sessions/create", reqBody)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -211,10 +199,6 @@ func TestHTTPCreateSessionWithCommand(t *testing.T) {
 	var response map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
-	}
-	
-	if response["name"] != "HTTP Command Session" {
-		t.Errorf("Expected session name 'HTTP Command Session', got '%v'", response["name"])
 	}
 	
 	if response["command"] != "ls -la" {
