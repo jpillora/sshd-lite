@@ -150,10 +150,23 @@ func (s *session) Resize(rows, cols int) error {
 	if s.PTY == nil {
 		return fmt.Errorf("no PTY available")
 	}
-	return pty.Setsize(s.PTY, &pty.Winsize{
-		Rows: uint16(rows),
-		Cols: uint16(cols),
-	})
+	
+	// Use timeout for PTY operations that may hang on Windows
+	done := make(chan error, 1)
+	go func() {
+		err := pty.Setsize(s.PTY, &pty.Winsize{
+			Rows: uint16(rows),
+			Cols: uint16(cols),
+		})
+		done <- err
+	}()
+	
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("timeout resizing PTY (operation may not be supported on this platform)")
+	}
 }
 
 func (s *session) GetPTY() pty.Pty {
