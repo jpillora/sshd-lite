@@ -3,6 +3,8 @@
 *.a
 *.so
 
+.crush
+
 # Folders
 _obj
 _test

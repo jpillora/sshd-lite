@@ -1,0 +1,10 @@
+# agent instructions
+
+* short commentary, no fluff, void "You're absolutely right!" and other similar responses
+* do not write comments, just the code
+* after each task, commit with three sections: (1) a summary of the work (2) an itemised list of actions performed (3) "PROMPT: <user-prompt-verbatim>"
+
+## go instructions
+
+* check the code compiles with `go build -v -o /dev/null <package>`
+* test the code with `go test -v <package>`
