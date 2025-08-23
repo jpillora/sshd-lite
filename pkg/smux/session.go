@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -50,7 +51,7 @@ func (s *session) executeInitialCommand(initialCommand string) {
 }
 
 func (s *session) startShell() error {
-	s.Command = exec.Command("/bin/bash")
+	s.Command = exec.Command(getDefaultShell())
 	s.Command.Env = os.Environ()
 
 	var err error
@@ -150,4 +151,25 @@ func (s *session) GetPTY() pty.Pty {
 
 func (s *session) GetPTYSession() *sshclient.PTYSession {
 	return sshclient.NewPTYSession(s.PTY)
+}
+
+func getDefaultShell() string {
+	shell := os.Getenv("SHELL")
+	if shell != "" {
+		if _, err := exec.LookPath(shell); err == nil {
+			return shell
+		}
+	}
+	
+	if runtime.GOOS == "windows" {
+		shell = "powershell"
+	} else {
+		shell = "bash"
+	}
+	
+	if p, err := exec.LookPath(shell); err == nil {
+		return p
+	}
+	
+	return "/bin/bash"
 }
