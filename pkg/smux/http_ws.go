@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/jpillora/sshd-lite/pkg/client"
+	sshclient "github.com/jpillora/sshd-lite/pkg/client"
 )
 
 var upgrader = websocket.Upgrader{
@@ -18,7 +18,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func (hs *HTTPServer) handleAttach(w http.ResponseWriter, r *http.Request) {
+func (hs *httpServer) handleAttach(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/attach/") {
 		http.NotFound(w, r)
@@ -49,7 +49,7 @@ func (hs *HTTPServer) handleAttach(w http.ResponseWriter, r *http.Request) {
 	
 	wsWrapper := &WebSocketWrapper{conn: conn}
 	ptySession := session.GetPTYSession()
-	wsSession := client.AttachWebSocketToSession(ptySession, wsWrapper, wsWrapper)
+	wsSession := sshclient.AttachWebSocketToSession(ptySession, wsWrapper, wsWrapper)
 	defer wsSession.Close()
 	
 	for {

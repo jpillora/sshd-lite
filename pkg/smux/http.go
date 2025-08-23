@@ -13,13 +13,13 @@ var indexHTML []byte
 
 const HTTPPort = 6688
 
-type HTTPServer struct {
-	sessionManager *SessionManager
+type httpServer struct {
+	sessionManager *sessionManager
 	mux            *http.ServeMux
 }
 
-func NewHTTPServer(sessionManager *SessionManager) *HTTPServer {
-	server := &HTTPServer{
+func newHTTPServer(sessionManager *sessionManager) *httpServer {
+	server := &httpServer{
 		sessionManager: sessionManager,
 		mux:            http.NewServeMux(),
 	}
@@ -28,7 +28,7 @@ func NewHTTPServer(sessionManager *SessionManager) *HTTPServer {
 	return server
 }
 
-func (hs *HTTPServer) setupRoutes() {
+func (hs *httpServer) setupRoutes() {
 	hs.mux.HandleFunc("/", hs.handleIndex)
 	hs.mux.HandleFunc("/api/sessions", hs.handleAPISessions)
 	hs.mux.HandleFunc("/api/sessions/create", hs.handleAPICreateSession)
@@ -36,7 +36,7 @@ func (hs *HTTPServer) setupRoutes() {
 	hs.mux.HandleFunc("/attach/", hs.handleAttach)
 }
 
-func (hs *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
+func (hs *httpServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
@@ -46,7 +46,7 @@ func (hs *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Write(indexHTML)
 }
 
-func (hs *HTTPServer) handleAPISessions(w http.ResponseWriter, r *http.Request) {
+func (hs *httpServer) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	sessions := hs.sessionManager.ListSessions()
 	
 	type sessionInfo struct {
@@ -68,7 +68,7 @@ func (hs *HTTPServer) handleAPISessions(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(sessionList)
 }
 
-func (hs *HTTPServer) handleAPICreateSession(w http.ResponseWriter, r *http.Request) {
+func (hs *httpServer) handleAPICreateSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -88,7 +88,7 @@ func (hs *HTTPServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 		req.ID = generateSessionID()
 	}
 	
-	var session *Session
+	var session *session
 	var err error
 	
 	if req.Command != "" {
@@ -115,7 +115,7 @@ func (hs *HTTPServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(response)
 }
 
-func (hs *HTTPServer) Start() error {
+func (hs *httpServer) Start() error {
 	log.Printf("Starting HTTP server on port %d", HTTPPort)
 	return http.ListenAndServe(fmt.Sprintf(":%d", HTTPPort), hs.mux)
 }

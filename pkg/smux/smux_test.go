@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewSessionManager(t *testing.T) {
-	sm := NewSessionManager()
+	sm := newSessionManager()
 	
 	// Test creating a session
 	session, err := sm.CreateSession("test-id")
@@ -47,8 +47,8 @@ func TestNewSessionManager(t *testing.T) {
 }
 
 func TestHTTPServer(t *testing.T) {
-	sm := NewSessionManager()
-	server := NewHTTPServer(sm)
+	sm := newSessionManager()
+	server := newHTTPServer(sm)
 	
 	// Create a test session
 	session, err := sm.CreateSession("test-session")
@@ -126,7 +126,7 @@ func TestWebSocketWrapper(t *testing.T) {
 }
 
 func TestSessionResize(t *testing.T) {
-	sm := NewSessionManager()
+	sm := newSessionManager()
 	session, err := sm.CreateSession("resize-test")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -158,7 +158,7 @@ func TestGenerateSessionID(t *testing.T) {
 }
 
 func TestCreateSessionWithCommand(t *testing.T) {
-	sm := NewSessionManager()
+	sm := newSessionManager()
 	
 	// Test creating a session with initial command
 	session, err := sm.CreateSessionWithCommand("test-cmd", "echo 'hello world'")
@@ -182,8 +182,8 @@ func TestCreateSessionWithCommand(t *testing.T) {
 }
 
 func TestHTTPCreateSessionWithCommand(t *testing.T) {
-	sm := NewSessionManager()
-	server := NewHTTPServer(sm)
+	sm := newSessionManager()
+	server := newHTTPServer(sm)
 	
 	// Test creating session with command via HTTP API
 	reqBody := strings.NewReader(`{"command":"ls -la"}`)

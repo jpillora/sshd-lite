@@ -42,17 +42,17 @@ func isWritable(path string) bool {
 	return true
 }
 
-type Daemon struct {
-	sessionManager *SessionManager
-	httpServer     *HTTPServer
+type daemon struct {
+	sessionManager *sessionManager
+	httpServer     *httpServer
 	mu             sync.Mutex
 }
 
-func NewDaemon() *Daemon {
-	sessionManager := NewSessionManager()
-	httpServer := NewHTTPServer(sessionManager)
+func newDaemon() *daemon {
+	sessionManager := newSessionManager()
+	httpServer := newHTTPServer(sessionManager)
 	
-	return &Daemon{
+	return &daemon{
 		sessionManager: sessionManager,
 		httpServer:     httpServer,
 	}
@@ -111,7 +111,7 @@ func RunDaemonProcess(foreground bool) error {
 	}
 	defer os.Remove(pidPath)
 	
-	daemon := NewDaemon()
+	daemon := newDaemon()
 	
 	// Create a default session
 	log.Println("Creating default session")

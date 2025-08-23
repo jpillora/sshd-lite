@@ -29,9 +29,9 @@ func TestDaemonProcessManagement(t *testing.T) {
 }
 
 func TestDaemonCreation(t *testing.T) {
-	daemon := NewDaemon()
+	daemon := newDaemon()
 	if daemon == nil {
-		t.Fatal("NewDaemon() returned nil")
+		t.Fatal("newDaemon() returned nil")
 	}
 	
 	if daemon.sessionManager == nil {
