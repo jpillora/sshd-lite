@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smux Terminal Multiplexer</title>
+    <script src="https://unpkg.com/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://unpkg.com/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/xterm@5.3.0/css/xterm.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1e1e1e;
+            color: #fff;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .sessions-panel {
+            background: #2d2d2d;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .session-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .session-item {
+            background: #3d3d3d;
+            border-radius: 3px;
+            padding: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .session-item:hover {
+            background: #4d4d4d;
+        }
+        .session-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .terminal-container {
+            background: #000;
+            border-radius: 5px;
+            padding: 10px;
+            display: none;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background: #005999;
+        }
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-left: auto;
+            font-size: 12px;
+            color: #888;
+        }
+        .new-session-form {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 10px;
+        }
+        input {
+            background: #3d3d3d;
+            color: white;
+            border: 1px solid #555;
+            padding: 8px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🖥️ Smux Terminal Multiplexer</h1>
+            <div class="status" id="status">Loading...</div>
+        </div>
+
+        <div class="sessions-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h2>Sessions</h2>
+                <button onclick="refreshSessions()">Refresh</button>
+            </div>
+            
+            <div class="new-session-form">
+                <input type="text" id="sessionName" placeholder="Session name (optional)" />
+                <input type="text" id="initialCommand" placeholder="Initial command (optional)" />
+                <button onclick="createSession()">Create New Session</button>
+            </div>
+            
+            <div class="session-list" id="sessionList">
+                <!-- Sessions will be populated here -->
+            </div>
+        </div>
+
+        <div class="terminal-container" id="terminalContainer">
+            <div class="controls">
+                <button onclick="disconnectTerminal()">Disconnect</button>
+                <span id="terminalStatus"></span>
+            </div>
+            <div id="terminal"></div>
+        </div>
+    </div>
+
+    <script>
+        let terminal = null;
+        let fitAddon = null;
+        let socket = null;
+        let currentSessionId = null;
+
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshSessions();
+            setInterval(refreshSessions, 5000); // Refresh every 5 seconds
+        });
+
+        async function refreshSessions() {
+            try {
+                const response = await fetch('/api/sessions');
+                const sessions = await response.json();
+                displaySessions(sessions);
+                updateStatus(`${sessions.length} sessions active`);
+            } catch (error) {
+                console.error('Failed to fetch sessions:', error);
+                updateStatus('Failed to fetch sessions');
+            }
+        }
+
+        function displaySessions(sessions) {
+            const sessionList = document.getElementById('sessionList');
+            
+            if (sessions.length === 0) {
+                sessionList.innerHTML = '<div style="color: #888; text-align: center; padding: 20px;">No active sessions</div>';
+                return;
+            }
+
+            sessionList.innerHTML = sessions.map(session => `
+                <div class="session-item" onclick="connectToSession('${session.id}')">
+                    <div class="session-info">
+                        <div>
+                            <strong>${session.name}</strong><br>
+                            <small>ID: ${session.id}</small>
+                        </div>
+                        <div style="text-align: right;">
+                            <div>${session.client_count} clients</div>
+                            <small>${session.start_time}</small>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function createSession() {
+            const nameInput = document.getElementById('sessionName');
+            const commandInput = document.getElementById('initialCommand');
+            const name = nameInput.value.trim();
+            const command = commandInput.value.trim();
+            
+            try {
+                const requestBody = {};
+                if (name) requestBody.name = name;
+                if (command) requestBody.command = command;
+                
+                const response = await fetch('/api/sessions/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (response.ok) {
+                    const session = await response.json();
+                    nameInput.value = '';
+                    commandInput.value = '';
+                    updateStatus(`Created session: ${session.name}`);
+                    refreshSessions();
+                    
+                    // Auto-connect to new session
+                    setTimeout(() => connectToSession(session.id), 500);
+                } else {
+                    const error = await response.text();
+                    updateStatus(`Failed to create session: ${error}`);
+                }
+            } catch (error) {
+                console.error('Failed to create session:', error);
+                updateStatus('Failed to create session');
+            }
+        }
+
+        function connectToSession(sessionId) {
+            if (currentSessionId === sessionId && socket && socket.readyState === WebSocket.OPEN) {
+                return; // Already connected
+            }
+
+            disconnectTerminal();
+            currentSessionId = sessionId;
+
+            // Show terminal container
+            document.getElementById('terminalContainer').style.display = 'block';
+            
+            // Initialize terminal if not already done
+            if (!terminal) {
+                terminal = new Terminal({
+                    cursorBlink: true,
+                    fontSize: 14,
+                    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                    theme: {
+                        background: '#000000',
+                        foreground: '#ffffff'
+                    }
+                });
+                
+                fitAddon = new FitAddon.FitAddon();
+                terminal.loadAddon(fitAddon);
+                terminal.open(document.getElementById('terminal'));
+                fitAddon.fit();
+                
+                // Handle window resize
+                window.addEventListener('resize', () => {
+                    if (fitAddon) {
+                        fitAddon.fit();
+                        sendResize();
+                    }
+                });
+            }
+
+            // Connect WebSocket
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/attach/${sessionId}`;
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function() {
+                updateTerminalStatus(`Connected to session: ${sessionId}`);
+                sendResize();
+                
+                // Handle terminal input
+                terminal.onData(data => {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            type: 'input',
+                            data: data
+                        }));
+                    }
+                });
+            };
+
+            socket.onmessage = function(event) {
+                if (terminal) {
+                    terminal.write(event.data);
+                }
+            };
+
+            socket.onclose = function() {
+                updateTerminalStatus('Disconnected');
+            };
+
+            socket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateTerminalStatus('Connection error');
+            };
+        }
+
+        function sendResize() {
+            if (socket && socket.readyState === WebSocket.OPEN && terminal) {
+                socket.send(JSON.stringify({
+                    type: 'resize',
+                    rows: terminal.rows,
+                    cols: terminal.cols
+                }));
+            }
+        }
+
+        function disconnectTerminal() {
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            currentSessionId = null;
+            document.getElementById('terminalContainer').style.display = 'none';
+            updateTerminalStatus('');
+        }
+
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        function updateTerminalStatus(message) {
+            document.getElementById('terminalStatus').textContent = message;
+        }
+    </script>
+</body>
+</html>

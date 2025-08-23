@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	sshd "github.com/jpillora/sshd-lite/server"
+	sshd "github.com/jpillora/sshd-lite/pkg/server"
 	"golang.org/x/crypto/ssh"
 )
 
