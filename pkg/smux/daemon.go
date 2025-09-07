@@ -1,15 +1,21 @@
 package smux
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 
-	sshd "github.com/jpillora/sshd-lite/pkg/server"
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -29,7 +35,6 @@ type Daemon struct {
 	config         Config
 	sessionManager *sessionManager
 	httpServer     *httpServer
-	sshServer      *sshd.Server
 	unixListener   net.Listener
 }
 
@@ -168,22 +173,15 @@ func (d *Daemon) startSSHServer() error {
 		return fmt.Errorf("failed to set socket permissions: %v", err)
 	}
 	
-	sshConfig := &sshd.Config{
-		Shell:         "/bin/bash",
-		AuthType:      "none",
-		TCPForwarding: false,
-	}
-	
-	sshServer, err := sshd.NewServer(sshConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create SSH server: %v", err)
-	}
-	d.sshServer = sshServer
-	
 	go func() {
 		log.Printf("SSH server listening on unix socket: %s", d.config.SocketPath)
-		if err := d.sshServer.StartWith(listener); err != nil {
-			log.Printf("SSH server error: %v", err)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				log.Printf("SSH listener error: %v", err)
+				return
+			}
+			go d.handleSSHConnection(conn)
 		}
 	}()
 	
@@ -195,4 +193,110 @@ func (d *Daemon) stopSSHServer() {
 		d.unixListener.Close()
 		os.Remove(d.config.SocketPath)
 	}
+}
+
+func (d *Daemon) generateSSHServerConfig() (*ssh.ServerConfig, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+
+	privateKeyPEM := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	}
+	privateKeyBytes := pem.EncodeToMemory(privateKeyPEM)
+
+	signer, err := ssh.ParsePrivateKey(privateKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	config := &ssh.ServerConfig{
+		NoClientAuth: true, // Allow any client to connect
+	}
+	config.AddHostKey(signer)
+
+	return config, nil
+}
+
+func (d *Daemon) handleSSHConnection(conn net.Conn) {
+	defer conn.Close()
+
+	config, err := d.generateSSHServerConfig()
+	if err != nil {
+		log.Printf("Failed to generate SSH config: %v", err)
+		return
+	}
+
+	sshConn, chans, reqs, err := ssh.NewServerConn(conn, config)
+	if err != nil {
+		log.Printf("Failed to handshake SSH connection: %v", err)
+		return
+	}
+	defer sshConn.Close()
+
+	go ssh.DiscardRequests(reqs)
+
+	for newChannel := range chans {
+		if newChannel.ChannelType() != "session" {
+			newChannel.Reject(ssh.UnknownChannelType, "unsupported channel type")
+			continue
+		}
+		go d.handleSSHSession(newChannel, sshConn.User())
+	}
+}
+
+func (d *Daemon) handleSSHSession(newChannel ssh.NewChannel, username string) {
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		return
+	}
+	defer channel.Close()
+
+	sessionName := d.extractSessionName(username)
+	
+	for req := range requests {
+		switch req.Type {
+		case "pty-req":
+			req.Reply(true, nil)
+		case "shell":
+			d.attachToSmuxSession(channel, sessionName)
+			req.Reply(true, nil)
+			return
+		default:
+			req.Reply(false, nil)
+		}
+	}
+}
+
+func (d *Daemon) extractSessionName(username string) string {
+	parts := strings.Split(username, "@")
+	if len(parts) > 0 && parts[0] != "" {
+		return parts[0]
+	}
+	return "1" // default session
+}
+
+func (d *Daemon) attachToSmuxSession(channel ssh.Channel, sessionName string) {
+	session, exists := d.sessionManager.GetSession(sessionName)
+	if !exists {
+		var err error
+		session, err = d.sessionManager.CreateSession(sessionName)
+		if err != nil {
+			channel.Write([]byte(fmt.Sprintf("Failed to create session %s: %v\r\n", sessionName, err)))
+			return
+		}
+		log.Printf("Created new session '%s' for SSH client", sessionName)
+	} else {
+		log.Printf("Attaching SSH client to existing session '%s'", sessionName)
+	}
+
+	go func() {
+		io.Copy(channel, session.PTY)
+	}()
+	
+	go func() {
+		io.Copy(session.PTY, channel)
+	}()
 }
