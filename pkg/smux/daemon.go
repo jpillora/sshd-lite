@@ -53,7 +53,7 @@ func NewDaemon(config Config) *Daemon {
 	}
 
 	sessionManager := newSessionManager()
-	httpServer := newHTTPServer(sessionManager, config.HTTPPort)
+	httpServer := newHTTPServer(sessionManager, config.HTTPPort, config.SocketPath)
 
 	return &Daemon{
 		config:         config,

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sshclient "github.com/jpillora/sshd-lite/pkg/client"
+	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -249,11 +250,11 @@ func (c *Client) createSessionWithCommand(id, command string) (string, error) {
 
 	return sessionID, nil
 }
-func (c *Client) AttachToSessionSSH(path, sessionName string) error {
-	// Parse the connection path
-	u, err := url.Parse(path)
+func (c *Client) AttachToSessionSSH(target, sessionName string) error {
+	// Parse the connection target
+	u, err := url.Parse(target)
 	if err != nil {
-		return fmt.Errorf("invalid path format: %v", err)
+		return fmt.Errorf("invalid target format: %v", err)
 	}
 	
 	switch u.Scheme {
@@ -261,8 +262,10 @@ func (c *Client) AttachToSessionSSH(path, sessionName string) error {
 		return c.attachToSessionUnixSocket(u.Path, sessionName)
 	case "tcp":
 		return c.attachToSessionTCP(u.Host, sessionName)
+	case "http", "https":
+		return c.attachToSessionHTTP(target, sessionName)
 	default:
-		return fmt.Errorf("unsupported scheme: %s (use unix:// or tcp://)", u.Scheme)
+		return fmt.Errorf("unsupported scheme: %s (use unix://, tcp://, or http://)", u.Scheme)
 	}
 }
 
@@ -344,3 +347,75 @@ func (c *Client) attachToSessionViaSSH(sessionName string) error {
 	
 	return nil
 }
+
+func (c *Client) attachToSessionHTTP(target, sessionName string) error {
+	// Parse the HTTP URL
+	u, err := url.Parse(target)
+	if err != nil {
+		return fmt.Errorf("invalid HTTP target: %v", err)
+	}
+	
+	// Build the WebSocket URL for the session
+	wsScheme := "ws"
+	if u.Scheme == "https" {
+		wsScheme = "wss"
+	}
+	
+	wsURL := fmt.Sprintf("%s://%s/attach/%s", wsScheme, u.Host, sessionName)
+	
+	// Connect to the WebSocket
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to WebSocket: %v", err)
+	}
+	defer conn.Close()
+	
+	fmt.Printf("Connected to session '%s' via HTTP WebSocket\n", sessionName)
+	fmt.Printf("WebSocket URL: %s\n", wsURL)
+	
+	// Set up terminal if we're in a terminal
+	if terminal.IsTerminal(int(os.Stdin.Fd())) {
+		// Set raw mode
+		oldState, err := terminal.MakeRaw(int(os.Stdin.Fd()))
+		if err != nil {
+			return fmt.Errorf("failed to set raw mode: %v", err)
+		}
+		defer terminal.Restore(int(os.Stdin.Fd()), oldState)
+	}
+	
+	// Bridge stdin/stdout with WebSocket
+	done := make(chan bool, 2)
+	
+	// Read from WebSocket and write to stdout
+	go func() {
+		defer func() { done <- true }()
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			os.Stdout.Write(message)
+		}
+	}()
+	
+	// Read from stdin and send to WebSocket
+	go func() {
+		defer func() { done <- true }()
+		buffer := make([]byte, 1024)
+		for {
+			n, err := os.Stdin.Read(buffer)
+			if err != nil {
+				return
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, buffer[:n]); err != nil {
+				return
+			}
+		}
+	}()
+	
+	// Wait for either direction to close
+	<-done
+	
+	return nil
+}
+

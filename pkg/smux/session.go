@@ -52,7 +52,7 @@ func (s *session) executeInitialCommand(initialCommand string) {
 
 func (s *session) startShell() error {
 	s.Command = exec.Command(getDefaultShell())
-	s.Command.Env = os.Environ()
+	s.Command.Env = append(os.Environ(), "SMUX_SESSION_NAME="+s.ID)
 
 	// Use a timeout to prevent hanging on Windows PTY issues
 	done := make(chan error, 1)

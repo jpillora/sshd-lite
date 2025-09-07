@@ -2,6 +2,7 @@ package smux
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -29,12 +30,7 @@ func (hs *httpServer) handleAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	session, exists := hs.sessionManager.GetSession(sessionID)
-	if !exists {
-		http.Error(w, "Session not found", http.StatusNotFound)
-		return
-	}
-	
+	// Upgrade to WebSocket first
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
@@ -42,51 +38,118 @@ func (hs *httpServer) handleAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	
+	// Use SSH client to connect to daemon instead of direct session manager access
+	sshClient := sshclient.NewClient()
+	sshClient.SetUser(sessionID)
+	
+	// Connect to the daemon via SSH (using same socket path as daemon)
+	socketPath := hs.socketPath
+	if socketPath == "" {
+		socketPath = DefaultSocketPath
+	}
+	if err := sshClient.ConnectUnixSocket(socketPath); err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to connect to daemon: %v\n", err)))
+		return
+	}
+	defer sshClient.Close()
+	
+	// Create SSH session
+	session, err := sshClient.NewSession()
+	if err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to create SSH session: %v\n", err)))
+		return
+	}
+	defer session.Close()
+	
 	clientID := hs.sessionManager.generateSessionID()
-	log.Printf("WebSocket client %s connecting to session %s", clientID, sessionID)
+	log.Printf("WebSocket client %s connecting to session %s via SSH", clientID, sessionID)
 	
-	wsWrapper := &WebSocketWrapper{conn: conn}
-	ptySession := session.GetPTYSession()
-	wsSession := sshclient.AttachWebSocketToSession(ptySession, wsWrapper, wsWrapper)
-	defer wsSession.Close()
+	// Request PTY
+	if err := session.RequestPty("xterm-256color", 24, 80, nil); err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to request PTY: %v\n", err)))
+		return
+	}
 	
-	for {
-		messageType, data, err := conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error: %v", err)
+	// Create pipes for SSH session I/O
+	sessionStdin, err := session.StdinPipe()
+	if err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to get stdin pipe: %v\n", err)))
+		return
+	}
+	
+	sessionStdout, err := session.StdoutPipe()
+	if err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to get stdout pipe: %v\n", err)))
+		return
+	}
+	
+	// Start shell
+	if err := session.Shell(); err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to start shell: %v\n", err)))
+		return
+	}
+	
+	// Bridge WebSocket and SSH session I/O
+	done := make(chan bool, 2)
+	
+	// Read from SSH stdout and send to WebSocket
+	go func() {
+		defer func() { done <- true }()
+		buffer := make([]byte, 1024)
+		for {
+			n, err := sessionStdout.Read(buffer)
+			if err != nil {
+				return
 			}
-			break
+			if err := conn.WriteMessage(websocket.TextMessage, buffer[:n]); err != nil {
+				return
+			}
 		}
-		
-		switch messageType {
-		case websocket.TextMessage:
-			var msg map[string]interface{}
-			if err := json.Unmarshal(data, &msg); err == nil {
-				if msgType, ok := msg["type"].(string); ok {
-					switch msgType {
-					case "resize":
-						if rows, ok := msg["rows"].(float64); ok {
-							if cols, ok := msg["cols"].(float64); ok {
-								wsSession.WindowChange(int(rows), int(cols))
+	}()
+	
+	// Read from WebSocket and send to SSH stdin
+	go func() {
+		defer func() { done <- true }()
+		for {
+			messageType, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			
+			switch messageType {
+			case websocket.TextMessage:
+				var msg map[string]interface{}
+				if err := json.Unmarshal(data, &msg); err == nil {
+					if msgType, ok := msg["type"].(string); ok {
+						switch msgType {
+						case "resize":
+							if rows, ok := msg["rows"].(float64); ok {
+								if cols, ok := msg["cols"].(float64); ok {
+									// Handle resize (would need SSH session resize support)
+									log.Printf("Window resize: %dx%d", int(cols), int(rows))
+								}
 							}
+							continue
+						case "input":
+							if input, ok := msg["data"].(string); ok {
+								sessionStdin.Write([]byte(input))
+							}
+							continue
 						}
-						continue
-					case "input":
-						if input, ok := msg["data"].(string); ok {
-							wsSession.Write([]byte(input))
-						}
-						continue
 					}
 				}
+				
+				// Fallback to treating as direct input
+				sessionStdin.Write(data)
+				
+			case websocket.BinaryMessage:
+				sessionStdin.Write(data)
 			}
-			
-			wsSession.Write(data)
-			
-		case websocket.BinaryMessage:
-			wsSession.Write(data)
 		}
-	}
+	}()
+	
+	// Wait for either direction to close
+	<-done
 }
 
 type WebSocketWrapper struct {

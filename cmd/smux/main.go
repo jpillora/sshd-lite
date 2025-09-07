@@ -37,17 +37,17 @@ func (d *daemonConfig) Run() error {
 
 type attachConfig struct {
 	smux.Config
-	Path    string `opts:"help=connection path (unix://socket or tcp://host:port)"`
+	Target  string `opts:"help=connection target"`
 	Session string `opts:"help=session name to attach to"`
 }
 
 func (a *attachConfig) Run() error {
 	// Set defaults
-	if a.Path == "" {
+	if a.Target == "" {
 		if a.Config.SocketPath == "" {
 			a.Config.SocketPath = smux.DefaultSocketPath
 		}
-		a.Path = "unix://" + a.Config.SocketPath
+		a.Target = "unix://" + a.Config.SocketPath
 	}
 	
 	if a.Session == "" {
@@ -59,7 +59,7 @@ func (a *attachConfig) Run() error {
 	}
 	
 	client := smux.NewClient(a.Config)
-	return client.AttachToSessionSSH(a.Path, a.Session)
+	return client.AttachToSessionSSH(a.Target, a.Session)
 }
 
 type listConfig struct {

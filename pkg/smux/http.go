@@ -17,13 +17,15 @@ type httpServer struct {
 	sessionManager *sessionManager
 	mux            *http.ServeMux
 	port           int
+	socketPath     string
 }
 
-func newHTTPServer(sessionManager *sessionManager, port int) *httpServer {
+func newHTTPServer(sessionManager *sessionManager, port int, socketPath string) *httpServer {
 	server := &httpServer{
 		sessionManager: sessionManager,
 		mux:            http.NewServeMux(),
 		port:           port,
+		socketPath:     socketPath,
 	}
 	
 	server.setupRoutes()
