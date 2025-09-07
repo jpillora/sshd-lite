@@ -6,10 +6,8 @@
 
 ## architecture instructions
 
-
 * `pkg/client` implements the a ssh client
 * `pkg/server` implements the a ssh server
-
 * `cmd/smux` is the `smux` CLI tool
     * it should import `pkg/smux`
 * `pkg/smux` implements the ssh-terminal-multiplexer
@@ -17,6 +15,9 @@
 
 ## go instructions
 
+* minimise use of package-level variables and functions
+    * prefer methods on structs to support encapsulation and testing
+    * package-level variables and functions should aliases singletons and their methods
 * check the code compiles with `go build -v -o /dev/null <package>`
 * check windows compatibility with `GOOS=windows go build -v -o /dev/null <package>`
 * test the code with `go test -v <package>`

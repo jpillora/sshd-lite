@@ -3,12 +3,14 @@
 * cli tool uses http://github.com/jpillora/opts (see opts README.md)
 * cli tool has these sub-commands:
 
-* `smux daemon`
-    * runs in foreground or background
-        * default is background, use `--foreground` flag to run in foreground
-    * writes `/var/run/smux.pid` on start
-    * in foreground mode, writes stdout to stdout
-    * in background mode, writes stdout to `/var/run/smux.log`
+1. `smux daemon` runs the daemon in foreground
+    * runs in foreground by default
+    * writes a pid file on start to `/var/run/smux.pid` (default location)
+    * writes logs to stdout
+    * with `smux daemon --background` set, runs the daemon in background
+        * forks current process (with setsid)
+        * passes `--pidfile` flag to child process
+        * sets `--logfile` flag to child process (default `/var/log/smux.log`)
     * `daemon` is an ssh server (uses the `server` package)
         * note: `server` implements a light version of normal `sshd` server
     * by default, only listens on `/var/run/smux.sock`
