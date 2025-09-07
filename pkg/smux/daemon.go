@@ -3,10 +3,13 @@ package smux
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
+
+	sshd "github.com/jpillora/sshd-lite/pkg/server"
 )
 
 const (
@@ -26,6 +29,8 @@ type Daemon struct {
 	config         Config
 	sessionManager *sessionManager
 	httpServer     *httpServer
+	sshServer      *sshd.Server
+	unixListener   net.Listener
 }
 
 func NewDaemon(config Config) *Daemon {
@@ -102,7 +107,21 @@ func (d *Daemon) StartBackground() error {
 		return fmt.Errorf("daemon already running")
 	}
 
-	cmd := exec.Command(os.Args[0], "daemon", "--background")
+	args := []string{"daemon"}
+	if d.config.SocketPath != DefaultSocketPath {
+		args = append(args, "--socket-path", d.config.SocketPath)
+	}
+	if d.config.PIDPath != "" && d.config.PIDPath != d.config.getPIDPath() {
+		args = append(args, "--pid-path", d.config.PIDPath)
+	}
+	if d.config.LogPath != "" && d.config.LogPath != d.config.getLogPath() {
+		args = append(args, "--log-path", d.config.LogPath)
+	}
+	if d.config.HTTPPort != 0 && d.config.HTTPPort != HTTPPort {
+		args = append(args, "--http-port", fmt.Sprintf("%d", d.config.HTTPPort))
+	}
+	
+	cmd := exec.Command(os.Args[0], args...)
 	d.setupDaemonProcess(cmd)
 
 	return cmd.Start()
@@ -127,6 +146,53 @@ func (d *Daemon) Run(foreground bool) error {
 	log.Println("Creating default session")
 	d.sessionManager.CreateSession("")
 
+	if err := d.startSSHServer(); err != nil {
+		return fmt.Errorf("failed to start SSH server: %v", err)
+	}
+	defer d.stopSSHServer()
+
 	log.Printf("Starting HTTP server on port %d", d.config.HTTPPort)
 	return d.httpServer.Start()
+}
+
+func (d *Daemon) startSSHServer() error {
+	os.Remove(d.config.SocketPath)
+	
+	listener, err := net.Listen("unix", d.config.SocketPath)
+	if err != nil {
+		return fmt.Errorf("failed to listen on unix socket: %v", err)
+	}
+	d.unixListener = listener
+	
+	if err := os.Chmod(d.config.SocketPath, 0600); err != nil {
+		return fmt.Errorf("failed to set socket permissions: %v", err)
+	}
+	
+	sshConfig := &sshd.Config{
+		Shell:         "/bin/bash",
+		AuthType:      "none",
+		TCPForwarding: false,
+	}
+	
+	sshServer, err := sshd.NewServer(sshConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create SSH server: %v", err)
+	}
+	d.sshServer = sshServer
+	
+	go func() {
+		log.Printf("SSH server listening on unix socket: %s", d.config.SocketPath)
+		if err := d.sshServer.StartWith(listener); err != nil {
+			log.Printf("SSH server error: %v", err)
+		}
+	}()
+	
+	return nil
+}
+
+func (d *Daemon) stopSSHServer() {
+	if d.unixListener != nil {
+		d.unixListener.Close()
+		os.Remove(d.config.SocketPath)
+	}
 }

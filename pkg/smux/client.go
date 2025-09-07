@@ -7,17 +7,26 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	sshclient "github.com/jpillora/sshd-lite/pkg/client"
 )
 
 type Client struct {
-	daemon *Daemon
-	port   int
+	config    Config
+	daemon    *Daemon
+	port      int
+	sshClient *sshclient.Client
 }
 
 func NewClient(config Config) *Client {
+	if config.HTTPPort == 0 {
+		config.HTTPPort = HTTPPort
+	}
 	return &Client{
-		daemon: NewDaemon(config),
-		port:   config.HTTPPort,
+		config:    config,
+		daemon:    NewDaemon(config),
+		port:      config.HTTPPort,
+		sshClient: sshclient.NewClient(),
 	}
 }
 
