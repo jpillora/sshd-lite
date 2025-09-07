@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-func setupDaemonProcess(cmd *exec.Cmd) {
+func (d *Daemon) setupDaemonProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}

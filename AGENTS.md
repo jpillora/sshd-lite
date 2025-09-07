@@ -17,7 +17,7 @@
 
 * minimise use of package-level variables and functions
     * prefer methods on structs to support encapsulation and testing
-    * package-level variables and functions should aliases singletons and their methods
+    * if you must have package-level variables and functions, then they should aliases singletons and their methods
 * check the code compiles with `go build -v -o /dev/null <package>`
 * check windows compatibility with `GOOS=windows go build -v -o /dev/null <package>`
 * test the code with `go test -v <package>`

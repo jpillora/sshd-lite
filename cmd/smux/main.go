@@ -16,41 +16,50 @@ type config struct {
 }
 
 type daemonConfig struct {
-	Foreground bool `opts:"help=run in foreground mode"`
+	smux.Config
+	Background bool `opts:"help=run in background mode"`
 }
 
 func (d *daemonConfig) Run() error {
-	if smux.IsDaemonRunning() {
+	daemon := smux.NewDaemon(d.Config)
+	if daemon.IsRunning() {
 		fmt.Println("already running")
 		return nil
 	}
-	if d.Foreground {
-		return smux.RunDaemonProcess(true)
+	if d.Background {
+		return daemon.StartBackground()
 	}
-	return smux.StartDaemonBackground()
+	return daemon.Run(true)
 }
 
 type attachConfig struct {
+	smux.Config
 	Session string `opts:"help=session name to attach to"`
 }
 
 func (a *attachConfig) Run() error {
-	return smux.AttachToSession(a.Session)
+	client := smux.NewClient(a.Config)
+	return client.AttachToSession(a.Session)
 }
 
-type listConfig struct{}
+type listConfig struct {
+	smux.Config
+}
 
 func (l *listConfig) Run() error {
-	return smux.ListSessions()
+	client := smux.NewClient(l.Config)
+	return client.ListSessions()
 }
 
 type newConfig struct {
+	smux.Config
 	Name    string `opts:"help=session name (optional)"`
 	Command string `opts:"help=initial command to run (optional)"`
 }
 
 func (n *newConfig) Run() error {
-	return smux.CreateNewSession(n.Name, n.Command)
+	client := smux.NewClient(n.Config)
+	return client.CreateNewSession(n.Name, n.Command)
 }
 
 func main() {

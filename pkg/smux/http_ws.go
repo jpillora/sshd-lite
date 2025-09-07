@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gorilla/websocket"
 	sshclient "github.com/jpillora/sshd-lite/pkg/client"
@@ -44,7 +42,7 @@ func (hs *httpServer) handleAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	
-	clientID := generateSessionID()
+	clientID := hs.sessionManager.generateSessionID()
 	log.Printf("WebSocket client %s connecting to session %s", clientID, sessionID)
 	
 	wsWrapper := &WebSocketWrapper{conn: conn}
@@ -115,8 +113,4 @@ func (w *WebSocketWrapper) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
-}
-
-func generateSessionID() string {
-	return strconv.FormatInt(time.Now().UnixNano(), 36)[:8]
 }

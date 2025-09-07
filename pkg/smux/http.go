@@ -16,12 +16,14 @@ const HTTPPort = 6688
 type httpServer struct {
 	sessionManager *sessionManager
 	mux            *http.ServeMux
+	port           int
 }
 
-func newHTTPServer(sessionManager *sessionManager) *httpServer {
+func newHTTPServer(sessionManager *sessionManager, port int) *httpServer {
 	server := &httpServer{
 		sessionManager: sessionManager,
 		mux:            http.NewServeMux(),
+		port:           port,
 	}
 	
 	server.setupRoutes()
@@ -85,7 +87,7 @@ func (hs *httpServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 	}
 	
 	if req.ID == "" {
-		req.ID = generateSessionID()
+		req.ID = hs.sessionManager.generateSessionID()
 	}
 	
 	var session *session
@@ -116,6 +118,6 @@ func (hs *httpServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 }
 
 func (hs *httpServer) Start() error {
-	log.Printf("Starting HTTP server on port %d", HTTPPort)
-	return http.ListenAndServe(fmt.Sprintf(":%d", HTTPPort), hs.mux)
+	log.Printf("Starting HTTP server on port %d", hs.port)
+	return http.ListenAndServe(fmt.Sprintf(":%d", hs.port), hs.mux)
 }

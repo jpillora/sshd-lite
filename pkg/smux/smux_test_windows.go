@@ -10,17 +10,16 @@ import (
 // minimal tests to ensure the package builds and basic functionality works.
 
 func TestDaemonProcessManagement(t *testing.T) {
-	// This test doesn't use PTY, so it should work on Windows
-	if IsDaemonRunning() {
+	config := Config{HTTPPort: HTTPPort}
+	daemon := NewDaemon(config)
+	if daemon.IsRunning() {
 		t.Log("Warning: daemon appears to be running, test may be unreliable")
 	}
 }
 
 func TestDaemonCreation(t *testing.T) {
-	// This test doesn't use PTY, so it should work on Windows
-	daemon := &daemon{
-		sessionManager: newSessionManager(),
-	}
+	config := Config{HTTPPort: HTTPPort}
+	daemon := NewDaemon(config)
 	if daemon.sessionManager == nil {
 		t.Error("Failed to create session manager")
 	}
@@ -38,9 +37,9 @@ func TestWebSocketWrapper(t *testing.T) {
 }
 
 func TestGenerateSessionID(t *testing.T) {
-	// This doesn't require PTY
-	id1 := generateSessionID()
-	id2 := generateSessionID()
+	sm := newSessionManager()
+	id1 := sm.generateSessionID()
+	id2 := sm.generateSessionID()
 	
 	if id1 == id2 {
 		t.Errorf("Generated session IDs should be unique, got %s and %s", id1, id2)

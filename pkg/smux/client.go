@@ -9,39 +9,46 @@ import (
 	"time"
 )
 
-func AttachToSession(sessionID string) error {
-	// Check if daemon is running on HTTP port
-	if !isHTTPDaemonRunning() {
+type Client struct {
+	daemon *Daemon
+	port   int
+}
+
+func NewClient(config Config) *Client {
+	return &Client{
+		daemon: NewDaemon(config),
+		port:   config.HTTPPort,
+	}
+}
+
+func (c *Client) AttachToSession(sessionID string) error {
+	if !c.isHTTPDaemonRunning() {
 		log.Println("Daemon not running, starting in background...")
-		if err := StartDaemonBackground(); err != nil {
+		if err := c.daemon.StartBackground(); err != nil {
 			return fmt.Errorf("failed to start daemon: %v", err)
 		}
-		// Give daemon time to start
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			time.Sleep(500 * time.Millisecond)
-			if isHTTPDaemonRunning() {
+			if c.isHTTPDaemonRunning() {
 				break
 			}
 			log.Println("Waiting for daemon to start...")
 		}
-		if !isHTTPDaemonRunning() {
+		if !c.isHTTPDaemonRunning() {
 			return fmt.Errorf("daemon failed to start")
 		}
 	}
 
-	// Get list of sessions
-	sessions, err := getSessionList()
+	sessions, err := c.getSessionList()
 	if err != nil {
 		return fmt.Errorf("failed to get session list: %v", err)
 	}
 
-	// Find or create session
 	var targetSessionID string
 	if sessionID == "" {
 		sessionID = "1"
 	}
 
-	// Look for existing session by ID
 	for _, session := range sessions {
 		if session.ID == sessionID {
 			targetSessionID = session.ID
@@ -49,32 +56,28 @@ func AttachToSession(sessionID string) error {
 		}
 	}
 
-	// If no session found, create one
 	if targetSessionID == "" {
-		sessionIDResult, err := createSession(sessionID)
+		sessionIDResult, err := c.createSession(sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to create session: %v", err)
 		}
 		targetSessionID = sessionIDResult
 	}
 
-	// Open browser to the session
-	url := fmt.Sprintf("http://localhost:%d/attach/%s", HTTPPort, targetSessionID)
+	url := fmt.Sprintf("http://localhost:%d/attach/%s", c.port, targetSessionID)
 	fmt.Printf("Opening browser to: %s\n", url)
-	fmt.Printf("Or visit: http://localhost:%d\n", HTTPPort)
+	fmt.Printf("Or visit: http://localhost:%d\n", c.port)
 	
-	// Try to open browser (this is a simple approach)
-	// In a real implementation, you might want to use a more sophisticated method
 	return nil
 }
 
-func ListSessions() error {
-	if !isHTTPDaemonRunning() {
+func (c *Client) ListSessions() error {
+	if !c.isHTTPDaemonRunning() {
 		fmt.Println("Daemon not running")
 		return nil
 	}
 
-	sessions, err := getSessionList()
+	sessions, err := c.getSessionList()
 	if err != nil {
 		return fmt.Errorf("failed to get session list: %v", err)
 	}
@@ -89,7 +92,37 @@ func ListSessions() error {
 		fmt.Printf("  %s (%d clients, started: %s)\n",
 			session.ID, session.ClientCount, session.StartTime)
 	}
-	fmt.Printf("\nWebUI available at: http://localhost:%d\n", HTTPPort)
+	fmt.Printf("\nWebUI available at: http://localhost:%d\n", c.port)
+
+	return nil
+}
+
+func (c *Client) CreateNewSession(sessionID, initialCommand string) error {
+	if !c.isHTTPDaemonRunning() {
+		log.Println("Daemon not running, starting in background...")
+		if err := c.daemon.StartBackground(); err != nil {
+			return fmt.Errorf("failed to start daemon: %v", err)
+		}
+		for range 10 {
+			time.Sleep(500 * time.Millisecond)
+			if c.isHTTPDaemonRunning() {
+				break
+			}
+			log.Println("Waiting for daemon to start...")
+		}
+		if !c.isHTTPDaemonRunning() {
+			return fmt.Errorf("daemon failed to start")
+		}
+	}
+
+	sessionIDResult, err := c.createSessionWithCommand(sessionID, initialCommand)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %v", err)
+	}
+
+	fmt.Printf("Created session: %s\n", sessionIDResult)
+	fmt.Printf("WebUI: http://localhost:%d/attach/%s\n", c.port, sessionIDResult)
+	fmt.Printf("Or visit: http://localhost:%d\n", c.port)
 
 	return nil
 }
@@ -100,8 +133,8 @@ type sessionInfo struct {
 	ClientCount int    `json:"client_count"`
 }
 
-func isHTTPDaemonRunning() bool {
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/sessions", HTTPPort))
+func (c *Client) isHTTPDaemonRunning() bool {
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/sessions", c.port))
 	if err != nil {
 		return false
 	}
@@ -109,8 +142,8 @@ func isHTTPDaemonRunning() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func getSessionList() ([]sessionInfo, error) {
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/sessions", HTTPPort))
+func (c *Client) getSessionList() ([]sessionInfo, error) {
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/sessions", c.port))
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +157,7 @@ func getSessionList() ([]sessionInfo, error) {
 	return sessions, nil
 }
 
-func createSession(id string) (string, error) {
+func (c *Client) createSession(id string) (string, error) {
 	reqBody := map[string]string{}
 	if id != "" {
 		reqBody["id"] = id
@@ -136,7 +169,7 @@ func createSession(id string) (string, error) {
 	}
 
 	resp, err := http.Post(
-		fmt.Sprintf("http://localhost:%d/api/sessions/create", HTTPPort),
+		fmt.Sprintf("http://localhost:%d/api/sessions/create", c.port),
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
@@ -149,7 +182,7 @@ func createSession(id string) (string, error) {
 		return "", fmt.Errorf("failed to create session: %s", resp.Status)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
@@ -162,40 +195,7 @@ func createSession(id string) (string, error) {
 	return sessionID, nil
 }
 
-func CreateNewSession(sessionID, initialCommand string) error {
-	// Check if daemon is running on HTTP port
-	if !isHTTPDaemonRunning() {
-		log.Println("Daemon not running, starting in background...")
-		if err := StartDaemonBackground(); err != nil {
-			return fmt.Errorf("failed to start daemon: %v", err)
-		}
-		// Give daemon time to start
-		for i := 0; i < 10; i++ {
-			time.Sleep(500 * time.Millisecond)
-			if isHTTPDaemonRunning() {
-				break
-			}
-			log.Println("Waiting for daemon to start...")
-		}
-		if !isHTTPDaemonRunning() {
-			return fmt.Errorf("daemon failed to start")
-		}
-	}
-
-	// Create session via API
-	sessionIDResult, err := createSessionWithCommand(sessionID, initialCommand)
-	if err != nil {
-		return fmt.Errorf("failed to create session: %v", err)
-	}
-
-	fmt.Printf("Created session: %s\n", sessionIDResult)
-	fmt.Printf("WebUI: http://localhost:%d/attach/%s\n", HTTPPort, sessionIDResult)
-	fmt.Printf("Or visit: http://localhost:%d\n", HTTPPort)
-
-	return nil
-}
-
-func createSessionWithCommand(id, command string) (string, error) {
+func (c *Client) createSessionWithCommand(id, command string) (string, error) {
 	reqBody := map[string]string{}
 	if id != "" {
 		reqBody["id"] = id
@@ -211,7 +211,7 @@ func createSessionWithCommand(id, command string) (string, error) {
 	}
 
 	resp, err := http.Post(
-		fmt.Sprintf("http://localhost:%d/api/sessions/create", HTTPPort),
+		fmt.Sprintf("http://localhost:%d/api/sessions/create", c.port),
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
@@ -224,7 +224,7 @@ func createSessionWithCommand(id, command string) (string, error) {
 		return "", fmt.Errorf("failed to create session: %s", resp.Status)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}

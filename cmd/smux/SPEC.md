@@ -26,6 +26,14 @@
         * request "list" with want-reply:true
         * response is a JSON payload
 
+## file structure
+
+* `cmd/smux/main.go` should be minimal, just call `opts.Parse` and `opts.Run`
+* the commands should be minimal too, they should:
+    * parse a `daemon.Config` (may contain `opts` struct tags)
+    * call a `daemon.Run(config)` function
+    * the daemon command in `cmd/` should have `--background` flag, but it should not be in `daemon.Config`. the `--background` flag should be handled in `cmd/smux/daemon.go` via struct embedding (see opts docs)
+
 ## user workflow
 
 1. user attaches to a named shell

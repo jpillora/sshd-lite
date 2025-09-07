@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type sessionManager struct {
@@ -16,6 +17,10 @@ func newSessionManager() *sessionManager {
 	return &sessionManager{
 		sessions: make(map[string]*session),
 	}
+}
+
+func (sm *sessionManager) generateSessionID() string {
+	return strconv.FormatInt(time.Now().UnixNano(), 36)[:8]
 }
 
 func (sm *sessionManager) nextAvailableID() string {

@@ -50,7 +50,7 @@ func TestNewSessionManager(t *testing.T) {
 
 func TestHTTPServer(t *testing.T) {
 	sm := newSessionManager()
-	server := newHTTPServer(sm)
+	server := newHTTPServer(sm, HTTPPort)
 	
 	// Create a test session
 	session, err := sm.CreateSession("test-session")
@@ -146,9 +146,10 @@ func TestSessionResize(t *testing.T) {
 }
 
 func TestGenerateSessionID(t *testing.T) {
-	id1 := generateSessionID()
+	sm := newSessionManager()
+	id1 := sm.generateSessionID()
 	time.Sleep(10 * time.Millisecond) // Ensure different timestamps
-	id2 := generateSessionID()
+	id2 := sm.generateSessionID()
 	
 	if id1 == id2 {
 		t.Errorf("Generated session IDs should be unique, got %s and %s", id1, id2)
@@ -185,7 +186,7 @@ func TestCreateSessionWithCommand(t *testing.T) {
 
 func TestHTTPCreateSessionWithCommand(t *testing.T) {
 	sm := newSessionManager()
-	server := newHTTPServer(sm)
+	server := newHTTPServer(sm, HTTPPort)
 	
 	// Test creating session with command via HTTP API
 	reqBody := strings.NewReader(`{"command":"ls -la"}`)

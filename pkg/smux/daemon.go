@@ -16,22 +16,59 @@ const (
 	DefaultLogPath    = "/var/run/smux.log"
 )
 
-func getPIDPath() string {
-	if isWritable("/var/run/") {
+type Config struct {
+	SocketPath string `opts:"help=Unix socket path for daemon"`
+	PIDPath    string `opts:"help=PID file path"`
+	LogPath    string `opts:"help=Log file path"`
+	HTTPPort   int    `opts:"help=HTTP port for web interface"`
+}
+
+type Daemon struct {
+	config         Config
+	sessionManager *sessionManager
+	httpServer     *httpServer
+	mu             sync.Mutex
+}
+
+func NewDaemon(config Config) *Daemon {
+	if config.SocketPath == "" {
+		config.SocketPath = DefaultSocketPath
+	}
+	if config.PIDPath == "" {
+		config.PIDPath = config.getPIDPath()
+	}
+	if config.LogPath == "" {
+		config.LogPath = config.getLogPath()
+	}
+	if config.HTTPPort == 0 {
+		config.HTTPPort = HTTPPort
+	}
+
+	sessionManager := newSessionManager()
+	httpServer := newHTTPServer(sessionManager, config.HTTPPort)
+	
+	return &Daemon{
+		config:         config,
+		sessionManager: sessionManager,
+		httpServer:     httpServer,
+	}
+}
+
+func (c Config) getPIDPath() string {
+	if c.isWritable("/var/run/") {
 		return DefaultPIDPath
 	}
 	return "/tmp/smux.pid"
 }
 
-func getLogPath() string {
-	if isWritable("/var/run/") {
+func (c Config) getLogPath() string {
+	if c.isWritable("/var/run/") {
 		return DefaultLogPath
 	}
 	return "/tmp/smux.log"
 }
 
-func isWritable(path string) bool {
-	// Test if we can create a file in the directory
+func (c Config) isWritable(path string) bool {
 	testFile := path + ".smux_test"
 	file, err := os.Create(testFile)
 	if err != nil {
@@ -42,25 +79,8 @@ func isWritable(path string) bool {
 	return true
 }
 
-type daemon struct {
-	sessionManager *sessionManager
-	httpServer     *httpServer
-	mu             sync.Mutex
-}
-
-func newDaemon() *daemon {
-	sessionManager := newSessionManager()
-	httpServer := newHTTPServer(sessionManager)
-	
-	return &daemon{
-		sessionManager: sessionManager,
-		httpServer:     httpServer,
-	}
-}
-
-func IsDaemonRunning() bool {
-	pidPath := getPIDPath()
-	pidBytes, err := os.ReadFile(pidPath)
+func (d *Daemon) IsRunning() bool {
+	pidBytes, err := os.ReadFile(d.config.PIDPath)
 	if err != nil {
 		return false
 	}
@@ -79,23 +99,20 @@ func IsDaemonRunning() bool {
 	return err == nil
 }
 
-func StartDaemonBackground() error {
-	if IsDaemonRunning() {
+func (d *Daemon) StartBackground() error {
+	if d.IsRunning() {
 		return fmt.Errorf("daemon already running")
 	}
 	
 	cmd := exec.Command(os.Args[0], "daemon", "--foreground")
-	setupDaemonProcess(cmd)
+	d.setupDaemonProcess(cmd)
 	
 	return cmd.Start()
 }
 
-func RunDaemonProcess(foreground bool) error {
-	pidPath := getPIDPath()
-	
+func (d *Daemon) Run(foreground bool) error {
 	if !foreground {
-		logPath := getLogPath()
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		logFile, err := os.OpenFile(d.config.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %v", err)
 		}
@@ -103,18 +120,15 @@ func RunDaemonProcess(foreground bool) error {
 		log.SetOutput(logFile)
 	}
 	
-	err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
+	err := os.WriteFile(d.config.PIDPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write PID file: %v", err)
 	}
-	defer os.Remove(pidPath)
+	defer os.Remove(d.config.PIDPath)
 	
-	daemon := newDaemon()
-	
-	// Create a default session
 	log.Println("Creating default session")
-	daemon.sessionManager.CreateSession("")
+	d.sessionManager.CreateSession("")
 	
-	log.Printf("Starting HTTP server on port %d", HTTPPort)
-	return daemon.httpServer.Start()
+	log.Printf("Starting HTTP server on port %d", d.config.HTTPPort)
+	return d.httpServer.Start()
 }
