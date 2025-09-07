@@ -7,7 +7,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -29,6 +29,7 @@ type Config struct {
 	PIDPath    string `opts:"help=PID file path"`
 	LogPath    string `opts:"help=Log file path"`
 	HTTPPort   int    `opts:"help=HTTP port for web interface"`
+	Debug      bool   `opts:"help=enable debug logging"`
 }
 
 type Daemon struct {
@@ -36,6 +37,7 @@ type Daemon struct {
 	sessionManager *sessionManager
 	httpServer     *httpServer
 	unixListener   net.Listener
+	logger         *slog.Logger
 }
 
 func NewDaemon(config Config) *Daemon {
@@ -51,16 +53,29 @@ func NewDaemon(config Config) *Daemon {
 	if config.HTTPPort == 0 {
 		config.HTTPPort = HTTPPort
 	}
+	
+	// Setup logger
+	level := slog.LevelInfo
+	if config.Debug {
+		level = slog.LevelDebug
+	}
+	
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: level,
+	})
+	logger := slog.New(handler)
 
-	sessionManager := newSessionManager()
-	httpServer := newHTTPServer(sessionManager, config.HTTPPort, config.SocketPath)
+	sessionManager := newSessionManager(logger)
+	httpServer := newHTTPServer(sessionManager, config.HTTPPort, config.SocketPath, logger)
 
 	return &Daemon{
 		config:         config,
 		sessionManager: sessionManager,
 		httpServer:     httpServer,
+		logger:         logger,
 	}
 }
+
 
 func (c Config) getPIDPath() string {
 	if c.isWritable("/var/run/") {
@@ -112,7 +127,7 @@ func (d *Daemon) StartBackground() error {
 		return fmt.Errorf("daemon already running")
 	}
 
-	args := []string{"daemon", "--no-foreground"}
+	args := []string{"daemon"}
 	if d.config.SocketPath != DefaultSocketPath {
 		args = append(args, "--socket-path", d.config.SocketPath)
 	}
@@ -125,8 +140,12 @@ func (d *Daemon) StartBackground() error {
 	if d.config.HTTPPort != 0 && d.config.HTTPPort != HTTPPort {
 		args = append(args, "--http-port", fmt.Sprintf("%d", d.config.HTTPPort))
 	}
+	if d.config.Debug {
+		args = append(args, "--debug")
+	}
 	
 	cmd := exec.Command(os.Args[0], args...)
+	cmd.Env = append(os.Environ(), "SMUX_NESTED=1")
 	d.setupDaemonProcess(cmd)
 
 	return cmd.Start()
@@ -139,7 +158,16 @@ func (d *Daemon) Run(foreground bool) error {
 			return fmt.Errorf("failed to open log file: %v", err)
 		}
 		defer logFile.Close()
-		log.SetOutput(logFile)
+		
+		level := slog.LevelInfo
+		if d.config.Debug {
+			level = slog.LevelDebug
+		}
+		
+		handler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
+			Level: level,
+		})
+		d.logger = slog.New(handler)
 	}
 
 	err := os.WriteFile(d.config.PIDPath, []byte(strconv.Itoa(os.Getpid())), 0644)
@@ -148,7 +176,7 @@ func (d *Daemon) Run(foreground bool) error {
 	}
 	defer os.Remove(d.config.PIDPath)
 
-	log.Println("Creating default session")
+	d.logger.Info("Creating default session")
 	d.sessionManager.CreateSession("")
 
 	if err := d.startSSHServer(); err != nil {
@@ -156,7 +184,7 @@ func (d *Daemon) Run(foreground bool) error {
 	}
 	defer d.stopSSHServer()
 
-	log.Printf("Starting HTTP server on port %d", d.config.HTTPPort)
+	d.logger.Info("Starting HTTP server", "port", d.config.HTTPPort)
 	return d.httpServer.Start()
 }
 
@@ -174,11 +202,11 @@ func (d *Daemon) startSSHServer() error {
 	}
 	
 	go func() {
-		log.Printf("SSH server listening on unix socket: %s", d.config.SocketPath)
+		d.logger.Info("SSH server listening on unix socket", "path", d.config.SocketPath)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
-				log.Printf("SSH listener error: %v", err)
+				d.logger.Error("SSH listener error", "error", err)
 				return
 			}
 			go d.handleSSHConnection(conn)
@@ -225,13 +253,13 @@ func (d *Daemon) handleSSHConnection(conn net.Conn) {
 
 	config, err := d.generateSSHServerConfig()
 	if err != nil {
-		log.Printf("Failed to generate SSH config: %v", err)
+		d.logger.Error("Failed to generate SSH config", "error", err)
 		return
 	}
 
 	sshConn, chans, reqs, err := ssh.NewServerConn(conn, config)
 	if err != nil {
-		log.Printf("Failed to handshake SSH connection: %v", err)
+		d.logger.Debug("Failed to handshake SSH connection", "error", err)
 		return
 	}
 	defer sshConn.Close()
@@ -287,9 +315,9 @@ func (d *Daemon) attachToSmuxSession(channel ssh.Channel, sessionName string) {
 			channel.Write([]byte(fmt.Sprintf("Failed to create session %s: %v\r\n", sessionName, err)))
 			return
 		}
-		log.Printf("Created new session '%s' for SSH client", sessionName)
+		d.logger.Info("Created new session for SSH client", "session", sessionName)
 	} else {
-		log.Printf("Attaching SSH client to existing session '%s'", sessionName)
+		d.logger.Debug("Attaching SSH client to existing session", "session", sessionName)
 	}
 
 	go func() {

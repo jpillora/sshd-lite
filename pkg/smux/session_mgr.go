@@ -2,7 +2,7 @@ package smux
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -11,11 +11,13 @@ import (
 type sessionManager struct {
 	sessions map[string]*session
 	mu       sync.RWMutex
+	logger   *slog.Logger
 }
 
-func newSessionManager() *sessionManager {
+func newSessionManager(logger *slog.Logger) *sessionManager {
 	return &sessionManager{
 		sessions: make(map[string]*session),
+		logger:   logger,
 	}
 }
 
@@ -60,9 +62,9 @@ func (sm *sessionManager) CreateSessionWithCommand(id, initialCommand string) (*
 	}
 
 	sm.sessions[id] = session
-	log.Printf("Created session %s", id)
+	sm.logger.Info("Created session", "id", id)
 	if initialCommand != "" {
-		log.Printf("Session %s initial command: %s", id, initialCommand)
+		sm.logger.Debug("Session initial command", "id", id, "command", initialCommand)
 	}
 	return session, nil
 }
@@ -92,6 +94,6 @@ func (sm *sessionManager) RemoveSession(id string) {
 	if session, exists := sm.sessions[id]; exists {
 		session.terminate()
 		delete(sm.sessions, id)
-		log.Printf("Removed session %s", id)
+		sm.logger.Info("Removed session", "id", id)
 	}
 }

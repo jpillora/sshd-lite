@@ -126,7 +126,7 @@ func (hs *httpServer) handleAttach(w http.ResponseWriter, r *http.Request) {
 							if rows, ok := msg["rows"].(float64); ok {
 								if cols, ok := msg["cols"].(float64); ok {
 									// Handle resize (would need SSH session resize support)
-									log.Printf("Window resize: %dx%d", int(cols), int(rows))
+									hs.logger.Debug("Window resize", "cols", int(cols), "rows", int(rows))
 								}
 							}
 							continue

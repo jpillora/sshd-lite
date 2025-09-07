@@ -4,15 +4,18 @@ package smux
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestNewSessionManager(t *testing.T) {
-	sm := newSessionManager()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sm := newSessionManager(logger)
 	
 	// Test creating a session
 	session, err := sm.CreateSession("test-id")
@@ -49,8 +52,9 @@ func TestNewSessionManager(t *testing.T) {
 }
 
 func TestHTTPServer(t *testing.T) {
-	sm := newSessionManager()
-	server := newHTTPServer(sm, HTTPPort)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sm := newSessionManager(logger)
+	server := newHTTPServer(sm, HTTPPort, "/tmp/test.sock", logger)
 	
 	// Create a test session
 	session, err := sm.CreateSession("test-session")
@@ -128,7 +132,8 @@ func TestWebSocketWrapper(t *testing.T) {
 }
 
 func TestSessionResize(t *testing.T) {
-	sm := newSessionManager()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sm := newSessionManager(logger)
 	session, err := sm.CreateSession("resize-test")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -146,7 +151,8 @@ func TestSessionResize(t *testing.T) {
 }
 
 func TestGenerateSessionID(t *testing.T) {
-	sm := newSessionManager()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sm := newSessionManager(logger)
 	id1 := sm.generateSessionID()
 	time.Sleep(10 * time.Millisecond) // Ensure different timestamps
 	id2 := sm.generateSessionID()
@@ -161,7 +167,8 @@ func TestGenerateSessionID(t *testing.T) {
 }
 
 func TestCreateSessionWithCommand(t *testing.T) {
-	sm := newSessionManager()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sm := newSessionManager(logger)
 	
 	// Test creating a session with initial command
 	session, err := sm.CreateSessionWithCommand("test-cmd", "echo 'hello world'")
@@ -185,8 +192,9 @@ func TestCreateSessionWithCommand(t *testing.T) {
 }
 
 func TestHTTPCreateSessionWithCommand(t *testing.T) {
-	sm := newSessionManager()
-	server := newHTTPServer(sm, HTTPPort)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sm := newSessionManager(logger)
+	server := newHTTPServer(sm, HTTPPort, "/tmp/test.sock", logger)
 	
 	// Test creating session with command via HTTP API
 	reqBody := strings.NewReader(`{"command":"ls -la"}`)

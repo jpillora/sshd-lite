@@ -25,3 +25,4 @@
 * prefer early returns
 * no `else { return <expr> }`, drop the `else`
 * **NEVER commit Go binaries to git** - build artifacts should only exist locally
+* all smux testing via bash, should be done using the `tmux` MCP tool

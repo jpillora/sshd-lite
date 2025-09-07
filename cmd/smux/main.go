@@ -18,8 +18,7 @@ type config struct {
 
 type daemonConfig struct {
 	smux.Config
-	Background   bool `opts:"help=run in background mode"`
-	NoForeground bool `opts:"help=run in background mode (internal use)" name:"no-foreground"`
+	Background bool `opts:"help=run in background mode"`
 }
 
 func (d *daemonConfig) Run() error {
@@ -31,8 +30,9 @@ func (d *daemonConfig) Run() error {
 	if d.Background {
 		return daemon.StartBackground()
 	}
-	// If NoForeground is set, run in background mode (with logging)
-	return daemon.Run(!d.NoForeground)
+	// Check if we're nested (spawned by background daemon)
+	isNested := os.Getenv("SMUX_NESTED") == "1"
+	return daemon.Run(!isNested)
 }
 
 type attachConfig struct {

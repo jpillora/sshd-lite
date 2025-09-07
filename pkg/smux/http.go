@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -18,14 +18,16 @@ type httpServer struct {
 	mux            *http.ServeMux
 	port           int
 	socketPath     string
+	logger         *slog.Logger
 }
 
-func newHTTPServer(sessionManager *sessionManager, port int, socketPath string) *httpServer {
+func newHTTPServer(sessionManager *sessionManager, port int, socketPath string, logger *slog.Logger) *httpServer {
 	server := &httpServer{
 		sessionManager: sessionManager,
 		mux:            http.NewServeMux(),
 		port:           port,
 		socketPath:     socketPath,
+		logger:         logger,
 	}
 	
 	server.setupRoutes()
@@ -120,6 +122,6 @@ func (hs *httpServer) handleAPICreateSession(w http.ResponseWriter, r *http.Requ
 }
 
 func (hs *httpServer) Start() error {
-	log.Printf("Starting HTTP server on port %d", hs.port)
+	hs.logger.Info("Starting HTTP server", "port", hs.port)
 	return http.ListenAndServe(fmt.Sprintf(":%d", hs.port), hs.mux)
 }

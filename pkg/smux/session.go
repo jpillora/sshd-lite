@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"runtime"
@@ -24,6 +24,7 @@ type session struct {
 	mu        sync.RWMutex
 	ctx       context.Context
 	cancel    context.CancelFunc
+	logger    *slog.Logger
 }
 
 type sessionClient struct {
@@ -40,6 +41,7 @@ func newSession(id string) *session {
 		clients:   make(map[string]*sessionClient),
 		ctx:       ctx,
 		cancel:    cancel,
+		logger:    slog.Default(), // Use default logger for sessions
 	}
 }
 
@@ -115,7 +117,7 @@ func (s *session) AddClient(clientID string, writer io.Writer, reader io.Reader)
 	}
 
 	s.clients[clientID] = client
-	log.Printf("Client %s attached to session %s", clientID, s.ID)
+	s.logger.Debug("Client attached to session", "client_id", clientID, "session_id", s.ID)
 
 	go s.handleClient(client)
 }
@@ -126,7 +128,7 @@ func (s *session) RemoveClient(clientID string) {
 
 	if _, exists := s.clients[clientID]; exists {
 		delete(s.clients, clientID)
-		log.Printf("Client %s detached from session %s", clientID, s.ID)
+		s.logger.Debug("Client detached from session", "client_id", clientID, "session_id", s.ID)
 	}
 }
 
