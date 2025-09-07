@@ -42,7 +42,7 @@ type Daemon struct {
 
 func NewDaemon(config Config) *Daemon {
 	if config.SocketPath == "" {
-		config.SocketPath = DefaultSocketPath
+		config.SocketPath = getDefaultSocketPath()
 	}
 	if config.PIDPath == "" {
 		config.PIDPath = config.getPIDPath()
@@ -77,7 +77,21 @@ func NewDaemon(config Config) *Daemon {
 }
 
 
+func getDefaultSocketPath() string {
+	if xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntimeDir != "" {
+		return xdgRuntimeDir + "/smux.sock"
+	}
+	return DefaultSocketPath
+}
+
+func GetDefaultSocketPath() string {
+	return getDefaultSocketPath()
+}
+
 func (c Config) getPIDPath() string {
+	if xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntimeDir != "" {
+		return xdgRuntimeDir + "/smux.pid"
+	}
 	if c.isWritable("/var/run/") {
 		return DefaultPIDPath
 	}
@@ -85,6 +99,9 @@ func (c Config) getPIDPath() string {
 }
 
 func (c Config) getLogPath() string {
+	if xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntimeDir != "" {
+		return xdgRuntimeDir + "/smux.log"
+	}
 	if c.isWritable("/var/run/") {
 		return DefaultLogPath
 	}
@@ -128,7 +145,7 @@ func (d *Daemon) StartBackground() error {
 	}
 
 	args := []string{"daemon"}
-	if d.config.SocketPath != DefaultSocketPath {
+	if d.config.SocketPath != getDefaultSocketPath() {
 		args = append(args, "--socket-path", d.config.SocketPath)
 	}
 	if d.config.PIDPath != "" && d.config.PIDPath != d.config.getPIDPath() {

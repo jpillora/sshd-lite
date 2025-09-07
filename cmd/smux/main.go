@@ -45,7 +45,7 @@ func (a *attachConfig) Run() error {
 	// Set defaults
 	if a.Target == "" {
 		if a.Config.SocketPath == "" {
-			a.Config.SocketPath = smux.DefaultSocketPath
+			a.Config.SocketPath = smux.GetDefaultSocketPath()
 		}
 		a.Target = "unix://" + a.Config.SocketPath
 	}

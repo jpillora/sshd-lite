@@ -45,7 +45,7 @@ func (hs *httpServer) handleAttach(w http.ResponseWriter, r *http.Request) {
 	// Connect to the daemon via SSH (using same socket path as daemon)
 	socketPath := hs.socketPath
 	if socketPath == "" {
-		socketPath = DefaultSocketPath
+		socketPath = GetDefaultSocketPath()
 	}
 	if err := sshClient.ConnectUnixSocket(socketPath); err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to connect to daemon: %v\n", err)))
