@@ -19,10 +19,23 @@ type config struct {
 type daemonConfig struct {
 	smux.Config
 	Background bool `opts:"help=run in background mode"`
+	Stop       bool `opts:"help=stop the running daemon"`
+	Restart    bool `opts:"help=restart the daemon"`
 }
 
 func (d *daemonConfig) Run() error {
 	daemon := smux.NewDaemon(d.Config)
+	
+	if d.Stop {
+		return daemon.Stop()
+	}
+	
+	if d.Restart {
+		if err := daemon.Stop(); err != nil {
+			fmt.Printf("Warning: failed to stop daemon: %v\n", err)
+		}
+	}
+	
 	if daemon.IsRunning() {
 		fmt.Println("already running")
 		return nil

@@ -119,6 +119,34 @@ func (c Config) isWritable(path string) bool {
 	return true
 }
 
+func (d *Daemon) Stop() error {
+	pidBytes, err := os.ReadFile(d.config.PIDPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("daemon not running (PID file not found)")
+		}
+		return fmt.Errorf("failed to read PID file: %v", err)
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil {
+		return fmt.Errorf("invalid PID in PID file: %v", err)
+	}
+
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("failed to find process: %v", err)
+	}
+
+	err = process.Kill()
+	if err != nil {
+		return fmt.Errorf("failed to kill process: %v", err)
+	}
+
+	os.Remove(d.config.PIDPath)
+	return nil
+}
+
 func (d *Daemon) IsRunning() bool {
 	pidBytes, err := os.ReadFile(d.config.PIDPath)
 	if err != nil {
