@@ -112,7 +112,7 @@ func (d *Daemon) StartBackground() error {
 		return fmt.Errorf("daemon already running")
 	}
 
-	args := []string{"daemon"}
+	args := []string{"daemon", "--no-foreground"}
 	if d.config.SocketPath != DefaultSocketPath {
 		args = append(args, "--socket-path", d.config.SocketPath)
 	}

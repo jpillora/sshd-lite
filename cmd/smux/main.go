@@ -17,7 +17,8 @@ type config struct {
 
 type daemonConfig struct {
 	smux.Config
-	Background bool `opts:"help=run in background mode"`
+	Background   bool `opts:"help=run in background mode"`
+	NoForeground bool `opts:"help=run in background mode (internal use)" name:"no-foreground"`
 }
 
 func (d *daemonConfig) Run() error {
@@ -29,7 +30,8 @@ func (d *daemonConfig) Run() error {
 	if d.Background {
 		return daemon.StartBackground()
 	}
-	return daemon.Run(true)
+	// If NoForeground is set, run in background mode (with logging)
+	return daemon.Run(!d.NoForeground)
 }
 
 type attachConfig struct {
