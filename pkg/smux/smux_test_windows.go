@@ -3,6 +3,8 @@
 package smux
 
 import (
+	"log/slog"
+	"os"
 	"testing"
 )
 
@@ -37,7 +39,10 @@ func TestWebSocketWrapper(t *testing.T) {
 }
 
 func TestGenerateSessionID(t *testing.T) {
-	sm := newSessionManager()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	sm := newSessionManager(logger)
 	id1 := sm.generateSessionID()
 	id2 := sm.generateSessionID()
 	

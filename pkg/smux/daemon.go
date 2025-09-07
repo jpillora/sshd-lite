@@ -337,11 +337,20 @@ func (d *Daemon) attachToSmuxSession(channel ssh.Channel, sessionName string) {
 		d.logger.Debug("Attaching SSH client to existing session", "session", sessionName)
 	}
 
+	// Use channels to coordinate the copying goroutines
+	done := make(chan struct{}, 2)
+	
 	go func() {
 		io.Copy(channel, session.PTY)
+		done <- struct{}{}
 	}()
 	
 	go func() {
 		io.Copy(session.PTY, channel)
+		done <- struct{}{}
 	}()
+	
+	// Wait for either direction to close
+	<-done
+	d.logger.Debug("SSH session ended", "session", sessionName)
 }
