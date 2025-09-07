@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"sync"
 	"syscall"
 )
 
@@ -27,7 +26,6 @@ type Daemon struct {
 	config         Config
 	sessionManager *sessionManager
 	httpServer     *httpServer
-	mu             sync.Mutex
 }
 
 func NewDaemon(config Config) *Daemon {
@@ -46,7 +44,7 @@ func NewDaemon(config Config) *Daemon {
 
 	sessionManager := newSessionManager()
 	httpServer := newHTTPServer(sessionManager, config.HTTPPort)
-	
+
 	return &Daemon{
 		config:         config,
 		sessionManager: sessionManager,
@@ -84,17 +82,17 @@ func (d *Daemon) IsRunning() bool {
 	if err != nil {
 		return false
 	}
-	
+
 	pid, err := strconv.Atoi(string(pidBytes))
 	if err != nil {
 		return false
 	}
-	
+
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
-	
+
 	err = process.Signal(syscall.Signal(0))
 	return err == nil
 }
@@ -103,10 +101,10 @@ func (d *Daemon) StartBackground() error {
 	if d.IsRunning() {
 		return fmt.Errorf("daemon already running")
 	}
-	
-	cmd := exec.Command(os.Args[0], "daemon", "--foreground")
+
+	cmd := exec.Command(os.Args[0], "daemon", "--background")
 	d.setupDaemonProcess(cmd)
-	
+
 	return cmd.Start()
 }
 
@@ -119,16 +117,16 @@ func (d *Daemon) Run(foreground bool) error {
 		defer logFile.Close()
 		log.SetOutput(logFile)
 	}
-	
+
 	err := os.WriteFile(d.config.PIDPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write PID file: %v", err)
 	}
 	defer os.Remove(d.config.PIDPath)
-	
+
 	log.Println("Creating default session")
 	d.sessionManager.CreateSession("")
-	
+
 	log.Printf("Starting HTTP server on port %d", d.config.HTTPPort)
 	return d.httpServer.Start()
 }
