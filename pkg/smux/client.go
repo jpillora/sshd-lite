@@ -251,11 +251,15 @@ func (c *Client) createSessionWithCommand(id, command string) (string, error) {
 	return sessionID, nil
 }
 func (c *Client) AttachToSessionSSH(target, sessionName string) error {
+	fmt.Printf("Attaching to session '%s' via target '%s'\n", sessionName, target)
+	
 	// Parse the connection target
 	u, err := url.Parse(target)
 	if err != nil {
 		return fmt.Errorf("invalid target format: %v", err)
 	}
+	
+	fmt.Printf("Parsed target: scheme=%s, path=%s, host=%s\n", u.Scheme, u.Path, u.Host)
 	
 	switch u.Scheme {
 	case "unix":
@@ -270,34 +274,43 @@ func (c *Client) AttachToSessionSSH(target, sessionName string) error {
 }
 
 func (c *Client) attachToSessionUnixSocket(socketPath, sessionName string) error {
+	fmt.Printf("Checking socket at: %s\n", socketPath)
+	
 	// Check if socket exists
 	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
 		return fmt.Errorf("socket not found: %s (is smux daemon running?)", socketPath)
 	}
 	
+	fmt.Printf("Socket found, setting username to: %s\n", sessionName)
 	// Set username BEFORE connecting
 	c.sshClient.SetUser(sessionName)
 	
+	fmt.Printf("Connecting to Unix socket: %s\n", socketPath)
 	// Connect to the socket
 	if err := c.sshClient.ConnectUnixSocket(socketPath); err != nil {
 		return fmt.Errorf("failed to connect to socket: %v", err)
 	}
 	
+	fmt.Printf("Connected successfully, starting SSH session\n")
 	return c.attachToSessionViaSSH(sessionName)
 }
 
 func (c *Client) attachToSessionTCP(hostPort, sessionName string) error {
+	fmt.Printf("Setting username to: %s\n", sessionName)
 	// Set username BEFORE connecting
 	c.sshClient.SetUser(sessionName)
 	
+	fmt.Printf("Connecting to TCP: %s\n", hostPort)
 	if err := c.sshClient.Connect(hostPort); err != nil {
 		return fmt.Errorf("failed to connect to %s: %v", hostPort, err)
 	}
 	
+	fmt.Printf("Connected successfully, starting SSH session\n")
 	return c.attachToSessionViaSSH(sessionName)
 }
 
 func (c *Client) attachToSessionViaSSH(sessionName string) error {
+	fmt.Printf("Creating SSH session for: %s\n", sessionName)
 	// Create an SSH session
 	session, err := c.sshClient.NewSession()
 	if err != nil {
@@ -307,23 +320,35 @@ func (c *Client) attachToSessionViaSSH(sessionName string) error {
 	
 	// Set up terminal if we're in a terminal
 	if terminal.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Printf("Terminal detected, setting up PTY\n")
 		// Get terminal size
 		width, height, err := terminal.GetSize(int(os.Stdin.Fd()))
 		if err != nil {
 			width, height = 80, 24 // defaults
 		}
 		
+		fmt.Printf("Terminal size: %dx%d\n", width, height)
+		
 		// Request PTY
 		if err := session.RequestPty("xterm-256color", height, width, nil); err != nil {
 			return fmt.Errorf("failed to request PTY: %v", err)
 		}
 		
+		fmt.Printf("PTY requested successfully, setting raw mode\n")
 		// Set raw mode
 		oldState, err := terminal.MakeRaw(int(os.Stdin.Fd()))
 		if err != nil {
 			return fmt.Errorf("failed to set raw mode: %v", err)
 		}
-		defer terminal.Restore(int(os.Stdin.Fd()), oldState)
+		defer func() {
+			fmt.Printf("Restoring terminal state\n")
+			terminal.Restore(int(os.Stdin.Fd()), oldState)
+			fmt.Printf("Terminal state restored\n")
+		}()
+		
+		fmt.Printf("Raw mode set, terminal ready\n")
+	} else {
+		fmt.Printf("Not a terminal, skipping PTY setup\n")
 	}
 	
 	// Connect stdin/stdout/stderr
@@ -331,24 +356,30 @@ func (c *Client) attachToSessionViaSSH(sessionName string) error {
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
 	
+	fmt.Printf("Starting shell session\n")
 	// Start shell
 	if err := session.Shell(); err != nil {
 		return fmt.Errorf("failed to start shell: %v", err)
 	}
 	
+	fmt.Printf("Shell started, waiting for completion\n")
 	// Wait for session to complete
 	if err := session.Wait(); err != nil {
 		// Check if it's just a normal exit
 		if strings.Contains(err.Error(), "exit status") {
+			fmt.Printf("Session exited normally\n")
 			return nil
 		}
 		return fmt.Errorf("session error: %v", err)
 	}
 	
+	fmt.Printf("Session completed successfully\n")
 	return nil
 }
 
 func (c *Client) attachToSessionHTTP(target, sessionName string) error {
+	fmt.Printf("Attaching to session '%s' via HTTP: %s\n", sessionName, target)
+	
 	// Parse the HTTP URL
 	u, err := url.Parse(target)
 	if err != nil {
@@ -362,8 +393,10 @@ func (c *Client) attachToSessionHTTP(target, sessionName string) error {
 	}
 	
 	wsURL := fmt.Sprintf("%s://%s/attach/%s", wsScheme, u.Host, sessionName)
+	fmt.Printf("WebSocket URL: %s\n", wsURL)
 	
 	// Connect to the WebSocket
+	fmt.Printf("Connecting to WebSocket...\n")
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to WebSocket: %v", err)
@@ -371,16 +404,24 @@ func (c *Client) attachToSessionHTTP(target, sessionName string) error {
 	defer conn.Close()
 	
 	fmt.Printf("Connected to session '%s' via HTTP WebSocket\n", sessionName)
-	fmt.Printf("WebSocket URL: %s\n", wsURL)
 	
 	// Set up terminal if we're in a terminal
 	if terminal.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Printf("Terminal detected, setting raw mode\n")
 		// Set raw mode
 		oldState, err := terminal.MakeRaw(int(os.Stdin.Fd()))
 		if err != nil {
 			return fmt.Errorf("failed to set raw mode: %v", err)
 		}
-		defer terminal.Restore(int(os.Stdin.Fd()), oldState)
+		defer func() {
+			fmt.Printf("Restoring terminal state\n")
+			terminal.Restore(int(os.Stdin.Fd()), oldState)
+			fmt.Printf("Terminal state restored\n")
+		}()
+		
+		fmt.Printf("Raw mode set, starting WebSocket bridge\n")
+	} else {
+		fmt.Printf("Not a terminal, starting WebSocket bridge\n")
 	}
 	
 	// Bridge stdin/stdout with WebSocket
@@ -413,9 +454,11 @@ func (c *Client) attachToSessionHTTP(target, sessionName string) error {
 		}
 	}()
 	
+	fmt.Printf("WebSocket bridge established, session active\n")
 	// Wait for either direction to close
 	<-done
 	
+	fmt.Printf("WebSocket session ended\n")
 	return nil
 }
 

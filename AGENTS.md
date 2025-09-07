@@ -25,4 +25,4 @@
 * prefer early returns
 * no `else { return <expr> }`, drop the `else`
 * **NEVER commit Go binaries to git** - build artifacts should only exist locally
-* all smux testing via bash, should be done using the `tmux` MCP tool
+* all smux testing via bash, should be done using the `tmux` MCP tool. don't use multiple panes, just use named sessions with 1 window pane, where you send-keys and capture-pane
