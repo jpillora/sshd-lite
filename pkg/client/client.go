@@ -64,3 +64,23 @@ func (c *Client) SendRequest(name string, wantReply bool, payload []byte) (bool,
 	}
 	return c.conn.SendRequest(name, wantReply, payload)
 }
+
+func (c *Client) SetUser(username string) {
+	c.config.User = username
+}
+
+func (c *Client) Connect(hostPort string) error {
+	conn, err := net.Dial("tcp", hostPort)
+	if err != nil {
+		return err
+	}
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, hostPort, c.config)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+
+	c.conn = ssh.NewClient(sshConn, chans, reqs)
+	return nil
+}

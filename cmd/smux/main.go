@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/user"
 
 	"github.com/jpillora/opts"
 	"github.com/jpillora/sshd-lite/pkg/smux"
@@ -36,12 +37,29 @@ func (d *daemonConfig) Run() error {
 
 type attachConfig struct {
 	smux.Config
+	Path    string `opts:"help=connection path (unix://socket or tcp://host:port)"`
 	Session string `opts:"help=session name to attach to"`
 }
 
 func (a *attachConfig) Run() error {
+	// Set defaults
+	if a.Path == "" {
+		if a.Config.SocketPath == "" {
+			a.Config.SocketPath = smux.DefaultSocketPath
+		}
+		a.Path = "unix://" + a.Config.SocketPath
+	}
+	
+	if a.Session == "" {
+		if currentUser, err := user.Current(); err == nil {
+			a.Session = currentUser.Username
+		} else {
+			a.Session = "default"
+		}
+	}
+	
 	client := smux.NewClient(a.Config)
-	return client.AttachToSession(a.Session)
+	return client.AttachToSessionSSH(a.Path, a.Session)
 }
 
 type listConfig struct {

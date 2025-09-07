@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	sshclient "github.com/jpillora/sshd-lite/pkg/client"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 type Client struct {
@@ -244,4 +248,99 @@ func (c *Client) createSessionWithCommand(id, command string) (string, error) {
 	}
 
 	return sessionID, nil
+}
+func (c *Client) AttachToSessionSSH(path, sessionName string) error {
+	// Parse the connection path
+	u, err := url.Parse(path)
+	if err != nil {
+		return fmt.Errorf("invalid path format: %v", err)
+	}
+	
+	switch u.Scheme {
+	case "unix":
+		return c.attachToSessionUnixSocket(u.Path, sessionName)
+	case "tcp":
+		return c.attachToSessionTCP(u.Host, sessionName)
+	default:
+		return fmt.Errorf("unsupported scheme: %s (use unix:// or tcp://)", u.Scheme)
+	}
+}
+
+func (c *Client) attachToSessionUnixSocket(socketPath, sessionName string) error {
+	// Check if socket exists
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+		return fmt.Errorf("socket not found: %s (is smux daemon running?)", socketPath)
+	}
+	
+	// Set username BEFORE connecting
+	c.sshClient.SetUser(sessionName)
+	
+	// Connect to the socket
+	if err := c.sshClient.ConnectUnixSocket(socketPath); err != nil {
+		return fmt.Errorf("failed to connect to socket: %v", err)
+	}
+	
+	return c.attachToSessionViaSSH(sessionName)
+}
+
+func (c *Client) attachToSessionTCP(hostPort, sessionName string) error {
+	// Set username BEFORE connecting
+	c.sshClient.SetUser(sessionName)
+	
+	if err := c.sshClient.Connect(hostPort); err != nil {
+		return fmt.Errorf("failed to connect to %s: %v", hostPort, err)
+	}
+	
+	return c.attachToSessionViaSSH(sessionName)
+}
+
+func (c *Client) attachToSessionViaSSH(sessionName string) error {
+	// Create an SSH session
+	session, err := c.sshClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create SSH session: %v", err)
+	}
+	defer session.Close()
+	
+	// Set up terminal if we're in a terminal
+	if terminal.IsTerminal(int(os.Stdin.Fd())) {
+		// Get terminal size
+		width, height, err := terminal.GetSize(int(os.Stdin.Fd()))
+		if err != nil {
+			width, height = 80, 24 // defaults
+		}
+		
+		// Request PTY
+		if err := session.RequestPty("xterm-256color", height, width, nil); err != nil {
+			return fmt.Errorf("failed to request PTY: %v", err)
+		}
+		
+		// Set raw mode
+		oldState, err := terminal.MakeRaw(int(os.Stdin.Fd()))
+		if err != nil {
+			return fmt.Errorf("failed to set raw mode: %v", err)
+		}
+		defer terminal.Restore(int(os.Stdin.Fd()), oldState)
+	}
+	
+	// Connect stdin/stdout/stderr
+	session.Stdin = os.Stdin
+	session.Stdout = os.Stdout
+	session.Stderr = os.Stderr
+	
+	// Start shell
+	if err := session.Shell(); err != nil {
+		return fmt.Errorf("failed to start shell: %v", err)
+	}
+	
+	// Wait for session to complete
+	if err := session.Wait(); err != nil {
+		// Check if it's just a normal exit
+		if strings.Contains(err.Error(), "exit status") {
+			return nil
+		}
+		return fmt.Errorf("session error: %v", err)
+	}
+	
+	return nil
 }
