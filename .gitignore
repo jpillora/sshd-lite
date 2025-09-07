@@ -26,3 +26,7 @@ _testmain.go
 *.prof
 
 dist/
+
+# Go binaries - never commit compiled binaries
+smux
+sshd-lite

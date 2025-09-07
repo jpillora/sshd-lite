@@ -24,3 +24,4 @@
 * write tests to confirm each step of the plan is working correctly
 * prefer early returns
 * no `else { return <expr> }`, drop the `else`
+* **NEVER commit Go binaries to git** - build artifacts should only exist locally
