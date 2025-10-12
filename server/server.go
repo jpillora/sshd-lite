@@ -209,8 +209,8 @@ func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Req
 			req.Reply(ok, nil)
 		case "subsystem":
 			ok := s.handleSubsystemRequest(connection, req)
+			req.Reply(ok, nil)
 			if !ok {
-				req.Reply(false, nil) // Reject unsupported subsystems
 				connection.Close()
 			}
 		default:
