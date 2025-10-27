@@ -7,7 +7,7 @@ replace github.com/creack/pty => github.com/photostorm/pty v1.1.19-0.20230903182
 
 require (
 	github.com/creack/pty v1.1.18
-	github.com/pkg/sftp v1.13.9
+	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.43.0
 )
 
