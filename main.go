@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 
 	sshd "github.com/jpillora/sshd-lite/server"
 )
@@ -26,8 +28,9 @@ var help = `
     --keepalive, server keep alive interval seconds (defaults to 60, 0 to disable)
     --sftp -s, enable the SFTP subsystem (disabled by default)
     --tcp-forwarding -t, enable TCP forwarding (both local and reverse, disabled by default)
-    --version, display version
+    --quiet -q, no logs
     --verbose -v, verbose logs
+    --version, display version
 
   <auth> must be set to one of:
     1. a username and password string separated by a colon ("myuser:mypass")
@@ -69,12 +72,14 @@ func main() {
 	flag.BoolVar(&c.SFTP, "sftp", false, "")
 	flag.BoolVar(&c.TCPForwarding, "t", false, "")
 	flag.BoolVar(&c.TCPForwarding, "tcp-forwarding", false, "")
+	v1f := flag.Bool("verbose", false, "")
+	v2f := flag.Bool("v", false, "")
+	q1f := flag.Bool("quiet", false, "")
+	q2f := flag.Bool("q", false, "")
 
 	//help/version
 	h1f := flag.Bool("h", false, "")
 	h2f := flag.Bool("help", false, "")
-	v1f := flag.Bool("verbose", false, "")
-	v2f := flag.Bool("v", false, "")
 	vf := flag.Bool("version", false, "")
 	flag.Parse()
 
@@ -86,6 +91,7 @@ func main() {
 		flag.Usage()
 	}
 
+	c.LogQuiet = *q1f || *q2f
 	c.LogVerbose = *v1f || *v2f
 
 	args := flag.Args()
@@ -98,7 +104,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = s.Start()
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+	defer cancel()
+
+	err = s.StartContext(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}

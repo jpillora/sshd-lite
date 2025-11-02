@@ -1,5 +1,7 @@
 package sshd
 
+import "log/slog"
+
 // Config is the configuration for the server
 type Config struct {
 	Host          string
@@ -11,6 +13,8 @@ type Config struct {
 	KeepAlive     int
 	IgnoreEnv     bool
 	LogVerbose    bool
+	LogQuiet      bool
+	Logger        *slog.Logger
 	SFTP          bool
 	TCPForwarding bool
 }

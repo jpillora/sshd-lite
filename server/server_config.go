@@ -2,7 +2,6 @@ package sshd
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -49,20 +48,19 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 		return nil, fmt.Errorf("failed to parse private key")
 	}
 	if s.config.KeyFile != "" {
-		log.Printf("Key from file %s", s.config.KeyFile)
+		s.infof("Key from file %s", s.config.KeyFile)
 	} else if s.config.KeySeed == "" {
-		log.Printf("Key from system rng")
+		s.infof("Key from system rng")
 	} else {
-		log.Printf("Key from seed")
+		s.infof("Key from seed")
 	}
-
 	sc.AddHostKey(pri)
-	log.Printf("RSA key fingerprint is %s", fingerprint(pri.PublicKey()))
+	s.infof("RSA key fingerprint is %s", fingerprint(pri.PublicKey()))
 
 	//setup auth
 	if s.config.AuthType == "none" {
 		sc.NoClientAuth = true // very dangerous
-		log.Printf("Authentication disabled")
+		s.infof("Authentication disabled")
 	} else if strings.HasPrefix(s.config.AuthType, "github.com/") {
 		username := strings.TrimPrefix(s.config.AuthType, "github.com/")
 		if err := s.githubCallback(username, sc); err != nil {
@@ -80,7 +78,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 			s.debugf("Authentication failed '%s:%s'", conn.User(), pass)
 			return nil, fmt.Errorf("denied")
 		}
-		log.Printf("Authentication enabled (user '%s')", u)
+		s.infof("Authentication enabled (user '%s')", u)
 	} else if s.config.AuthType != "" {
 		if err := s.fileCallback(sc); err != nil {
 			return nil, err
@@ -92,7 +90,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 }
 
 func (s *Server) githubCallback(username string, sc *ssh.ServerConfig) error {
-	log.Printf("Fetching ssh public keys for github user %s", username)
+	s.infof("Fetching ssh public keys for github user %s", username)
 	keys, err := githubKeys(username)
 	if err != nil {
 		return err
@@ -100,7 +98,7 @@ func (s *Server) githubCallback(username string, sc *ssh.ServerConfig) error {
 	sc.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 		return nil, s.matchKeys(key, keys)
 	}
-	log.Printf("Authentication enabled (github keys #%d)", len(keys))
+	s.infof("Authentication enabled (github keys #%d)", len(keys))
 	return nil
 }
 
@@ -120,7 +118,7 @@ func (s *Server) fileCallback(sc *ssh.ServerConfig) error {
 		}
 		return nil, s.matchKeys(key, keys)
 	}
-	log.Printf("Authentication enabled (public keys #%d)", len(keys))
+	s.infof("Authentication enabled (public keys #%d)", len(keys))
 	return nil
 }
 

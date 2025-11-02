@@ -1,10 +1,11 @@
 package sshd
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/jpillora/jplog"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -25,13 +27,20 @@ type Server struct {
 
 // NewServer creates a new Server
 func NewServer(c *Config) (*Server, error) {
+	if l := c.Logger; l == nil && !c.LogQuiet {
+		h := jplog.Handler(os.Stdout)
+		if c.LogVerbose {
+			h = h.Verbose()
+		}
+		l = slog.New(h)
+		c.Logger = l
+	}
 	s := &Server{config: c}
 	sc, err := s.computeSSHConfig()
 	if err != nil {
 		return nil, err
 	}
 	s.sshConfig = sc
-
 	// Initialize TCP forwarding handler if enabled
 	if c.TCPForwarding {
 		s.tcpForwardingHandler = NewTCPForwardingHandler(s)
@@ -42,6 +51,11 @@ func NewServer(c *Config) (*Server, error) {
 
 // Start listening on port
 func (s *Server) Start() error {
+	return s.StartContext(context.Background())
+}
+
+// StartContext listening on port with context
+func (s *Server) StartContext(ctx context.Context) error {
 	h := s.config.Host
 	p := s.config.Port
 	var l net.Listener
@@ -65,23 +79,34 @@ func (s *Server) Start() error {
 		}
 	}
 
-	return s.StartWith(l)
+	return s.StartWithContext(ctx, l)
 }
 
 // StartWith starts the server with the provided listener.
 // Ignores the Host and Port in the config.
 func (s *Server) StartWith(l net.Listener) error {
-	defer l.Close()
+	return s.StartWithContext(context.Background(), l)
+}
 
+// StartWithContext starts the server with the provided listener and context.
+// The server will close when the context is cancelled.
+// Ignores the Host and Port in the config.
+func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
+	defer l.Close()
 	if s.config.SFTP {
-		log.Print("SFTP enabled")
+		s.infof("SFTP enabled")
 	}
 	if s.config.TCPForwarding {
-		log.Print("TCP forwarding enabled")
+		s.infof("TCP forwarding enabled")
 	}
-
 	// Accept all connections
-	log.Printf("Listening on %s...", l.Addr())
+	s.infof("Listening on %s...", l.Addr())
+	// Close listener when context is cancelled
+	go func() {
+		<-ctx.Done()
+		s.infof("Closing server")
+		l.Close()
+	}()
 	for {
 		tcpConn, err := l.Accept()
 		if err != nil {
@@ -89,7 +114,7 @@ func (s *Server) StartWith(l net.Listener) error {
 			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
 				return nil // Expected error when stopping
 			}
-			log.Printf("Failed to accept incoming connection (%s)", err)
+			s.errorf("Failed to accept incoming connection (%s)", err)
 			continue
 		}
 		go s.handleConn(tcpConn)
@@ -101,7 +126,7 @@ func (s *Server) handleConn(tcpConn net.Conn) {
 	sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, s.sshConfig)
 	if err != nil {
 		if err != io.EOF {
-			log.Printf("Failed to handshake (%s)", err)
+			s.errorf("Failed to handshake (%s)", err)
 		}
 		return
 	}
@@ -283,7 +308,7 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 			// Use Signal instead of Wait to avoid blocking if process already exited
 			err := shell.Process.Signal(os.Interrupt)
 			if err != nil && !strings.Contains(err.Error(), "process already finished") && !strings.Contains(err.Error(), "already exited") {
-				log.Printf("Failed to interrupt shell: %s", err)
+				s.errorf("Failed to interrupt shell: %s", err)
 			}
 			// Give a short time for the process to exit gracefully before killing
 			time.Sleep(100 * time.Millisecond)
@@ -322,7 +347,7 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 		// don't signal on EOF.
 		if shell.Process != nil {
 			if ps, err := shell.Process.Wait(); err != nil && ps != nil && !strings.Contains(err.Error(), "wait: no child processes") && !strings.Contains(err.Error(), "exit status") && !strings.Contains(err.Error(), "Wait was already called") {
-				log.Printf("Shell process wait error: (%s)", err)
+				s.errorf("Shell process wait error: (%s)", err)
 			}
 			// It appears that closing the pty is an idempotent operation
 			// therefore making this call ensures that the other two coroutines
@@ -353,8 +378,21 @@ func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time,
 }
 
 func (s *Server) debugf(f string, args ...interface{}) {
-	if s.config.LogVerbose {
-		log.Printf(f, args...)
+	if !s.config.LogQuiet {
+		// debug logs only emit if enabled on the slogger (verbose is enabled)
+		s.config.Logger.Debug(fmt.Sprintf(f, args...))
+	}
+}
+
+func (s *Server) infof(f string, args ...interface{}) {
+	if !s.config.LogQuiet {
+		s.config.Logger.Info(fmt.Sprintf(f, args...))
+	}
+}
+
+func (s *Server) errorf(f string, args ...interface{}) {
+	if !s.config.LogQuiet {
+		s.config.Logger.Error(fmt.Sprintf(f, args...))
 	}
 }
 
