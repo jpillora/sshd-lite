@@ -299,6 +299,7 @@ func (s *Server) keepAlive(connection ssh.Channel, interval time.Duration, ticki
 
 func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-chan []byte) error {
 	shell := exec.Command(s.config.Shell)
+	setSysProcAttr(shell)
 	shell.Env = env
 	s.debugf("Session env: %v", env)
 
@@ -447,6 +448,7 @@ func (s *Server) executeCommand(connection ssh.Channel, command string, env []st
 	defer connection.Close()
 	// Use shell to execute the command
 	cmd := exec.Command(s.config.Shell, "-c", command)
+	setSysProcAttr(cmd)
 	cmd.Env = env          // TODO: append?
 	cmd.Stdin = connection // Connect stdin to the SSH channel
 	cmd.Stdout = connection
