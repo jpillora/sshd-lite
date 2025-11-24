@@ -9,7 +9,7 @@ require (
 	github.com/creack/pty v1.1.18
 	github.com/jpillora/jplog v1.0.2
 	github.com/pkg/sftp v1.13.10
-	golang.org/x/crypto v0.43.0
+	golang.org/x/crypto v0.45.0
 )
 
 require (
