@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/jpillora/jplog"
 	"golang.org/x/crypto/ssh"
 )
@@ -319,7 +318,7 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 		s.debugf("Session closed")
 	}
 	//start a shell for this channel's connection
-	shellf, err := pty.Start(shell)
+	shellf, err := startPTY(shell)
 	if err != nil {
 		close()
 		return fmt.Errorf("could not start pty (%s)", err)
