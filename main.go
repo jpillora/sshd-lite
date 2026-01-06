@@ -1,3 +1,5 @@
+//go:generate go tool github.com/jpillora/md-tmpl -w README.md
+
 package main
 
 import (

@@ -66,40 +66,6 @@ $ sshd-lite --help
 <!--tmpl,code=plain:echo "$ sshd-lite --help" && go run main.go --help 2>/dev/null | sed 's#0.0.0-src#X.Y.Z#' -->
 ``` plain 
 $ sshd-lite --help
-
-  Usage: sshd-lite [options] <auth>
-
-  Version: X.Y.Z
-
-  Options:
-    --host, listening interface (defaults to all)
-    --port -p, listening port (defaults to 22, then fallsback to 2200)
-    --shell, the type of to use shell for remote sessions (defaults to $SHELL, then bash/powershell)
-    --keyfile, a filepath to an private key (for example, an 'id_rsa' file)
-    --keyseed, a string to use to seed key generation
-    --noenv, ignore environment variables provided by the client
-    --keepalive, server keep alive interval seconds (defaults to 60, 0 to disable)
-    --sftp -s, enable the SFTP subsystem (disabled by default)
-    --tcp-forwarding -t, enable TCP forwarding (both local and reverse, disabled by default)
-    --version, display version
-    --verbose -v, verbose logs
-
-  <auth> must be set to one of:
-    1. a username and password string separated by a colon ("myuser:mypass")
-    2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
-    3. an authorized github user ("github.com/myuser") public keys from .keys
-    4. "none" to disable client authentication :WARNING: very insecure
-
-  Notes:
-    * if no keyfile and no keyseed are set, a random RSA2048 key is used
-    * authorized_key files are automatically reloaded on change
-    * once authenticated, clients will have access to a shell of the
-    current user. sshd-lite does not lookup system users.
-    * sshd-lite supports remote shells, command execution, sftp, and tcp forwarding.
-    * sftp working directory is the home directory of the user
-
-  Read more: https://github.com/jpillora/sshd-lite
-
 ```
 <!--/tmpl-->
 

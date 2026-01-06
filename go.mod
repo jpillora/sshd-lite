@@ -10,6 +10,8 @@ require (
 	golang.org/x/crypto v0.46.0
 )
 
+require github.com/jpillora/md-tmpl v1.3.0 // indirect
+
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
@@ -23,3 +25,5 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 )
+
+tool github.com/jpillora/md-tmpl
