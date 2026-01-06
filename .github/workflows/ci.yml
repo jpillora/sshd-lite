@@ -1,3 +1,4 @@
+# yaml-language-server: $schema https://json.schemastore.org/github-workflow.json
 name: CI
 on:
   pull_request: {}
@@ -28,9 +29,6 @@ jobs:
         run: go build -v -o /dev/null .
       - name: Test
         run: go test -v ./...
-      - name: Windows Integration Test
-        if: runner.os == 'Windows'
-        run: go test -v ./server -run TestWindowsPowerShellCommand -timeout 60s
   # ================
   # RELEASE BINARIES (on push "v*" tag)
   # ================
