@@ -305,15 +305,16 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 	close := func() {
 		connection.Close()
 		if shell.Process != nil {
-			// Use Signal instead of Wait to avoid blocking if process already exited
-			err := shell.Process.Signal(os.Interrupt)
-			if err != nil && !strings.Contains(err.Error(), "process already finished") && !strings.Contains(err.Error(), "already exited") {
-				s.errorf("Failed to interrupt shell: %s", err)
+			signalErr := shell.Process.Signal(os.Interrupt)
+			if signalErr != nil && !strings.Contains(signalErr.Error(), "process already finished") && !strings.Contains(signalErr.Error(), "already exited") && !strings.Contains(signalErr.Error(), "not supported") {
+				s.errorf("Failed to interrupt shell: %s", signalErr)
 			}
-			// Give a short time for the process to exit gracefully before killing
 			time.Sleep(100 * time.Millisecond)
-			shell.Process.Kill() // Ensure process is killed
-			shell.Process.Wait() // Wait for cleanup
+			killErr := shell.Process.Kill()
+			if killErr != nil && !strings.Contains(killErr.Error(), "process already finished") && !strings.Contains(killErr.Error(), "already exited") && !strings.Contains(killErr.Error(), "not supported") {
+				s.errorf("Failed to kill shell: %s", killErr)
+			}
+			shell.Process.Wait()
 		}
 		s.debugf("Session closed")
 	}
@@ -333,11 +334,17 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 	//pipe session to shell and visa-versa
 	var once sync.Once
 	go func() {
-		io.Copy(connection, shellf)
+		_, err := io.Copy(connection, shellf)
+		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
+			s.debugf("Shell to connection copy error: %s", err)
+		}
 		once.Do(close)
 	}()
 	go func() {
-		io.Copy(shellf, connection)
+		_, err := io.Copy(shellf, connection)
+		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
+			s.debugf("Connection to shell copy error: %s", err)
+		}
 		once.Do(close)
 	}()
 	//
@@ -346,8 +353,11 @@ func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-cha
 		// Start proactively listening for process death, for those ptys that
 		// don't signal on EOF.
 		if shell.Process != nil {
-			if ps, err := shell.Process.Wait(); err != nil && ps != nil && !strings.Contains(err.Error(), "wait: no child processes") && !strings.Contains(err.Error(), "exit status") && !strings.Contains(err.Error(), "Wait was already called") {
-				s.errorf("Shell process wait error: (%s)", err)
+			_, err := shell.Process.Wait()
+			if err != nil {
+				if !strings.Contains(err.Error(), "wait: no child processes") && !strings.Contains(err.Error(), "exit status") && !strings.Contains(err.Error(), "Wait was already called") {
+					s.errorf("Shell process wait error: (%s)", err)
+				}
 			}
 			// It appears that closing the pty is an idempotent operation
 			// therefore making this call ensures that the other two coroutines

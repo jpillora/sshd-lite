@@ -3,6 +3,7 @@ package sshd_test
 import (
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,7 +83,8 @@ var exec = testCase{
 		if err != nil {
 			return fmt.Errorf("failed to run command: %w", err)
 		}
-		if string(out) != "helloworld\n" {
+		cleanOut := strings.ReplaceAll(string(out), "\r\n", "\n")
+		if cleanOut != "helloworld\n" {
 			return fmt.Errorf("unexpected output: %q", out)
 		}
 		return nil
