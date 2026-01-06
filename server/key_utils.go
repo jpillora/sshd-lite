@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -17,12 +18,23 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func generateKey(seed string) ([]byte, error) {
+func generateKey(seed string, ec bool) ([]byte, error) {
 	var r io.Reader
 	if seed == "" {
 		r = rand.Reader
 	} else {
 		r = newDetermRand([]byte(seed))
+	}
+	if ec {
+		_, pri, err := ed25519.GenerateKey(r)
+		if err != nil {
+			return nil, err
+		}
+		pemBlock, err := ssh.MarshalPrivateKey(pri, "EC PRIVATE KEY")
+		if err != nil {
+			return nil, err
+		}
+		return pem.EncodeToMemory(pemBlock), nil
 	}
 	priv, err := rsa.GenerateKey(r, 2048)
 	if err != nil {

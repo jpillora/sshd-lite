@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,8 +29,11 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	s.debugf("Session shell %s", s.config.Shell)
 
 	var key []byte
-	if s.config.KeyFile != "" {
-		//user provided key (can generate with 'ssh-keygen -t rsa')
+	if len(s.config.KeyBytes) > 0 {
+		//user provided key bytes
+		key = s.config.KeyBytes
+	} else if s.config.KeyFile != "" {
+		//user provided key (can generate with 'ssh-keygen')
 		b, err := os.ReadFile(s.config.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load keyfile")
@@ -37,7 +41,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 		key = b
 	} else {
 		//generate key now
-		b, err := generateKey(s.config.KeySeed)
+		b, err := generateKey(s.config.KeySeed, s.config.KeySeedEC)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate private key")
 		}
@@ -47,18 +51,26 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key")
 	}
-	if s.config.KeyFile != "" {
-		s.infof("Key from file %s", s.config.KeyFile)
-	} else if s.config.KeySeed == "" {
-		s.infof("Key from system rng")
-	} else {
-		s.infof("Key from seed")
-	}
 	sc.AddHostKey(pri)
-	s.infof("RSA key fingerprint is %s", fingerprint(pri.PublicKey()))
-
-	//setup auth
-	if s.config.AuthType == "none" {
+	s.infof("Private key loaded, Public Key: %s", strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pri.PublicKey()))))
+	s.infof("Fingerprint is %s", fingerprint(pri.PublicKey()))
+	//setup auth - if AuthKeys are set, use them exclusively
+	if len(s.config.AuthKeys) > 0 {
+		if s.config.AuthType != "" {
+			return nil, fmt.Errorf("cannot use AuthType with AuthKeys")
+		}
+		sc.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			for _, k := range s.config.AuthKeys {
+				if bytes.Equal(key.Marshal(), k.Marshal()) {
+					s.debugf("User authenticated with public key %s", fingerprint(key))
+					return nil, nil
+				}
+			}
+			s.debugf("User authentication failed with public key %s", fingerprint(key))
+			return nil, fmt.Errorf("denied")
+		}
+		s.infof("Authentication enabled (auth keys #%d)", len(s.config.AuthKeys))
+	} else if s.config.AuthType == "none" {
 		sc.NoClientAuth = true // very dangerous
 		s.infof("Authentication disabled")
 	} else if strings.HasPrefix(s.config.AuthType, "github.com/") {
@@ -84,7 +96,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 			return nil, err
 		}
 	} else {
-		return nil, fmt.Errorf("missing auth-type")
+		return nil, fmt.Errorf("missing key authorization configuration")
 	}
 	return sc, nil
 }
