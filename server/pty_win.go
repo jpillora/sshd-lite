@@ -6,14 +6,21 @@ package sshd
 import (
 	"os/exec"
 
-	"github.com/jpillora/sshd-lite/winpty"
+	"github.com/creack/pty"
 )
 
-func init() {
-	startPTY = func(cmd *exec.Cmd) (PTY, error) {
-		// winpty.Start returns pty.Pty which implements PTY interface
-		return winpty.Start(cmd)
-	}
+type FdHolder = pty.FdHolder
+
+type Winsize = pty.Winsize
+
+func startPTY(cmd *exec.Cmd) (PTY, error) {
+	return pty.Start(cmd)
+}
+
+func SetWinsize(t FdHolder, w, h uint32) {
+	ws := &Winsize{Rows: uint16(h), Cols: uint16(w)}
+	pty.Setsize(t, ws)
+}
 }
 
 // SetWinsize sets the size of the given pty.

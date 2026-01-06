@@ -86,6 +86,21 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	} else {
 		return nil, fmt.Errorf("missing auth-type")
 	}
+
+	//add custom auth handlers
+	if len(s.config.Auth) > 0 {
+		sc.KeyboardInteractiveCallback = func(conn ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+			for _, h := range s.config.Auth {
+				perms, err := h.Handle(conn, nil)
+				if err == nil {
+					return perms, nil
+				}
+			}
+			return nil, fmt.Errorf("all authentication methods failed")
+		}
+		s.infof("Custom authentication enabled (%d handlers)", len(s.config.Auth))
+	}
+
 	return sc, nil
 }
 

@@ -1,6 +1,10 @@
 package sshd
 
-import "log/slog"
+import (
+	"log/slog"
+
+	"golang.org/x/crypto/ssh"
+)
 
 // Config is the configuration for the server
 type Config struct {
@@ -10,6 +14,7 @@ type Config struct {
 	KeyFile       string       `opts:"name=keyfile,help=a filepath to a private key (for example an 'id_rsa' file)"`
 	KeySeed       string       `opts:"name=keyseed,help=a string to use to seed key generation"`
 	AuthType      string       `opts:"mode=arg,name=auth"`
+	Auth          []ssh.Auth   `opts:"-"`
 	KeepAlive     int          `opts:"name=keepalive,help=server keep alive interval seconds (0 to disable)"`
 	IgnoreEnv     bool         `opts:"name=noenv,help=ignore environment variables provided by the client"`
 	LogVerbose    bool         `opts:"name=verbose,short=v,help=verbose logs"`

@@ -9,10 +9,6 @@ require (
 	golang.org/x/crypto v0.46.0
 )
 
-require github.com/jpillora/sshd-lite/winpty v0.0.0
-
-replace github.com/jpillora/sshd-lite/winpty => ./winpty
-
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect

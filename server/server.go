@@ -299,6 +299,9 @@ func (s *Server) keepAlive(connection ssh.Channel, interval time.Duration, ticki
 func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-chan []byte) error {
 	shell := exec.Command(s.config.Shell)
 	setSysProcAttr(shell)
+	if !hasEnv(env, "TERM") {
+		env = append(env, "TERM=xterm-256color")
+	}
 	shell.Env = env
 	s.debugf("Session env: %v", env)
 
@@ -406,6 +409,16 @@ func appendEnv(env []string, kv string) []string {
 		}
 	}
 	return append(env, kv)
+}
+
+func hasEnv(env []string, key string) bool {
+	k := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, k) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleGlobalRequests(reqs <-chan *ssh.Request, conn ssh.Conn) {

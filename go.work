@@ -1,6 +1,3 @@
 go 1.25
 
-use (
-	.
-	./winpty
-)
+use (.)
