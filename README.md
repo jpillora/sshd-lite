@@ -95,8 +95,7 @@ $ sshd-lite --help
     * authorized_key files are automatically reloaded on change
     * once authenticated, clients will have access to a shell of the
     current user. sshd-lite does not lookup system users.
-    * sshd-lite only supports remotes shells, sftp, and tcp forwarding. command
-    execution are not currently supported.
+    * sshd-lite supports remote shells, command execution, sftp, and tcp forwarding.
     * sftp working directory is the home directory of the user
 
   Read more: https://github.com/jpillora/sshd-lite
