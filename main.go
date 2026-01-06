@@ -9,7 +9,7 @@ import (
 	"os/signal"
 
 	"github.com/jpillora/opts"
-	sshd "github.com/jpillora/sshd-lite/server"
+	"github.com/jpillora/sshd-lite/sshd"
 )
 
 var version string = "0.0.0-src" //set via ldflags

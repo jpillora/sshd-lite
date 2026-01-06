@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/jpillora/jplog"
-	"github.com/jpillora/sshd-lite/server/key"
+	"github.com/jpillora/sshd-lite/sshd/key"
 	"golang.org/x/crypto/ssh"
 )
 

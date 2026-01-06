@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	sshd "github.com/jpillora/sshd-lite/server"
+	"github.com/jpillora/sshd-lite/sshd"
 )
 
 type testCase struct {

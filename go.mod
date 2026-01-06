@@ -2,6 +2,8 @@ module github.com/jpillora/sshd-lite
 
 go 1.25
 
+tool github.com/jpillora/md-tmpl
+
 require (
 	github.com/creack/pty v1.1.24
 	github.com/jpillora/jplog v1.0.2
@@ -25,5 +27,3 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 )
-
-tool github.com/jpillora/md-tmpl

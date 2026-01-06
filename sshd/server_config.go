@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jpillora/sshd-lite/server/key"
+	"github.com/jpillora/sshd-lite/sshd/key"
 	"golang.org/x/crypto/ssh"
 )
 

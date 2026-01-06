@@ -3,8 +3,8 @@ package key_test
 import (
 	"testing"
 
-	sshd "github.com/jpillora/sshd-lite/server"
-	"github.com/jpillora/sshd-lite/server/key"
+	"github.com/jpillora/sshd-lite/sshd"
+	"github.com/jpillora/sshd-lite/sshd/key"
 	"golang.org/x/crypto/ssh"
 )
 
