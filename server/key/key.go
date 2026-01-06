@@ -1,4 +1,4 @@
-package sshd
+package key
 
 import (
 	"bytes"
@@ -13,17 +13,23 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"golang.org/x/crypto/ssh"
 )
 
-func generateKey(seed string, ec bool) ([]byte, error) {
+type Map map[string]string
+
+func (m Map) HasKey(k ssh.PublicKey) bool {
+	_, ok := m[string(k.Marshal())]
+	return ok
+}
+
+func GenerateKey(seed string, ec bool) ([]byte, error) {
 	var r io.Reader
 	if seed == "" {
 		r = rand.Reader
 	} else {
-		r = newDetermRand([]byte(seed))
+		r = NewDetermRand([]byte(seed))
 	}
 	if ec {
 		_, pri, err := ed25519.GenerateKey(r)
@@ -48,7 +54,7 @@ func generateKey(seed string, ec bool) ([]byte, error) {
 	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: b}), nil
 }
 
-func githubKeys(user string) (map[string]string, error) {
+func GitHubKeys(user string) (Map, error) {
 	resp, err := http.Get("https://github.com/" + user + ".keys")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch github user keys: %w", err)
@@ -58,58 +64,49 @@ func githubKeys(user string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseKeys(b)
+	return ParseKeys(b)
 }
 
-func parseKeys(b []byte) (map[string]string, error) {
+func ParseKeys(b []byte) (Map, error) {
 	lines := bytes.Split(b, []byte("\n"))
-	//parse each line
-	keys := map[string]string{}
+	m := Map{}
 	for _, l := range lines {
 		if key, cmt, _, _, err := ssh.ParseAuthorizedKey(l); err == nil {
-			keys[string(key.Marshal())] = cmt
+			m[string(key.Marshal())] = cmt
 		}
 	}
-	//ensure we got something
-	if len(keys) == 0 {
+	if len(m) == 0 {
 		return nil, fmt.Errorf("no keys found")
 	}
-	return keys, nil
+	return m, nil
 }
 
-func fingerprint(k ssh.PublicKey) string {
+func Fingerprint(k ssh.PublicKey) string {
 	bytes := sha256.Sum256(k.Marshal())
-	b64 := base64.StdEncoding.EncodeToString(bytes[:])
-	if strings.HasSuffix(b64, "=") {
-		b64 = strings.TrimSuffix(b64, "=") + "."
-	}
+	b64 := base64.StdEncoding.WithPadding(base64.NoPadding).EncodeToString(bytes[:])
 	return "SHA256:" + b64
 }
 
-//========
+const DetermRandIter = 2048
 
-const determRandIter = 2048
-
-func newDetermRand(seed []byte) io.Reader {
+func NewDetermRand(seed []byte) io.Reader {
 	var out []byte
-	//strengthen seed
 	var next = seed
-	for i := 0; i < determRandIter; i++ {
+	for i := 0; i < DetermRandIter; i++ {
 		next, out = hash(next)
 	}
-	return &determRand{
+	return &DetermRand{
 		next: next,
 		out:  out,
 	}
 }
 
-type determRand struct {
+type DetermRand struct {
 	next, out []byte
 }
 
-func (d *determRand) Read(b []byte) (int, error) {
+func (d *DetermRand) Read(b []byte) (int, error) {
 	l := len(b)
-	//HACK: combat https://golang.org/src/crypto/rsa/rsa.go#L257
 	if l == 1 {
 		return 1, nil
 	}

@@ -1,6 +1,9 @@
 # sshd-lite
 
-A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). A slightly more practical version of the SSH daemon described in this blog post http://blog.gopheracademy.com/go-and-ssh/. **Warning, this is beta software**.
+[![GoDoc](https://img.shields.io/static/v1?label=godoc&message=reference&color=00add8)](https://pkg.go.dev/github.com/jpillora/sshd-lite)
+[![CI](https://github.com/jpillora/sshd-lite/workflows/CI/badge.svg)](https://github.com/jpillora/sshd-lite/actions?workflow=CI)
+
+A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). A slightly more practical version of the SSH daemon described in this blog post http://blog.gopheracademy.com/go-and-ssh/.
 
 ### Install
 
@@ -115,7 +118,7 @@ $ sshd-lite --help
 
 #### MIT License
 
-Copyright © 2020 Jaime Pillora &lt;dev@jpillora.com&gt;
+Copyright © 2026 Jaime Pillora &lt;dev@jpillora.com&gt;
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the

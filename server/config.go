@@ -12,8 +12,8 @@ type Config struct {
 	Port          string `opts:"short=p,help=listening port (defaults to 22 then fallsback to 2200)"`
 	Shell         string `opts:"help=the shell to use for remote sessions, env=SHELL,default=bash/powershell"`
 	KeyFile       string `opts:"name=keyfile,help=a filepath to a private key (for example an 'id_rsa' file)"`
-	KeySeed       string `opts:"name=keyseed,help=a string to use to seed key generation"`
-	KeySeedEC     bool   `opts:"name=keyseed-ec,help=use elliptic curve for key generation"`
+	KeySeed       string `opts:"name=keyseed,env,help=a string to use to seed key generation"`
+	KeySeedEC     bool   `opts:"name=keyseed-ec,env,help=use elliptic curve for key generation"`
 	AuthType      string `opts:"mode=arg,name=auth"`
 	KeepAlive     int    `opts:"name=keepalive,help=server keep alive interval seconds (0 to disable)"`
 	IgnoreEnv     bool   `opts:"name=noenv,help=ignore environment variables provided by the client"`

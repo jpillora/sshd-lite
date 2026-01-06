@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jpillora/jplog"
+	"github.com/jpillora/sshd-lite/server/key"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -380,7 +381,7 @@ func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time,
 		return nil, last, fmt.Errorf("not updated")
 	}
 	b, _ := os.ReadFile(s.config.AuthType)
-	keys, err := parseKeys(b)
+	keys, err := key.ParseKeys(b)
 	if err != nil {
 		return nil, last, err
 	}

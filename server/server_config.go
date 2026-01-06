@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jpillora/sshd-lite/server/key"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -28,45 +29,46 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	s.config.Shell = p
 	s.debugf("Session shell %s", s.config.Shell)
 
-	var key []byte
+	var keyBytes []byte
 	if len(s.config.KeyBytes) > 0 {
 		//user provided key bytes
-		key = s.config.KeyBytes
+		keyBytes = s.config.KeyBytes
 	} else if s.config.KeyFile != "" {
 		//user provided key (can generate with 'ssh-keygen')
 		b, err := os.ReadFile(s.config.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load keyfile")
 		}
-		key = b
+		keyBytes = b
 	} else {
 		//generate key now
-		b, err := generateKey(s.config.KeySeed, s.config.KeySeedEC)
+		b, err := key.GenerateKey(s.config.KeySeed, s.config.KeySeedEC)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate private key")
 		}
-		key = b
+		keyBytes = b
 	}
-	pri, err := ssh.ParsePrivateKey(key)
+	pri, err := ssh.ParsePrivateKey(keyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key")
 	}
 	sc.AddHostKey(pri)
-	s.infof("Private key loaded, Public Key: %s", strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pri.PublicKey()))))
-	s.infof("Fingerprint is %s", fingerprint(pri.PublicKey()))
+	s.infof("Private key loaded")
+	s.infof("Public Key: %s", strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pri.PublicKey()))))
+	s.infof("Fingerprint: %s", key.Fingerprint(pri.PublicKey()))
 	//setup auth - if AuthKeys are set, use them exclusively
 	if len(s.config.AuthKeys) > 0 {
 		if s.config.AuthType != "" {
 			return nil, fmt.Errorf("cannot use AuthType with AuthKeys")
 		}
-		sc.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		sc.PublicKeyCallback = func(conn ssh.ConnMetadata, pubkey ssh.PublicKey) (*ssh.Permissions, error) {
 			for _, k := range s.config.AuthKeys {
-				if bytes.Equal(key.Marshal(), k.Marshal()) {
-					s.debugf("User authenticated with public key %s", fingerprint(key))
+				if bytes.Equal(pubkey.Marshal(), k.Marshal()) {
+					s.debugf("User authenticated with public key %s", key.Fingerprint(pubkey))
 					return nil, nil
 				}
 			}
-			s.debugf("User authentication failed with public key %s", fingerprint(key))
+			s.debugf("User authentication failed with public key %s", key.Fingerprint(pubkey))
 			return nil, fmt.Errorf("denied")
 		}
 		s.infof("Authentication enabled (auth keys #%d)", len(s.config.AuthKeys))
@@ -103,7 +105,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 
 func (s *Server) githubCallback(username string, sc *ssh.ServerConfig) error {
 	s.infof("Fetching ssh public keys for github user %s", username)
-	keys, err := githubKeys(username)
+	keys, err := key.GitHubKeys(username)
 	if err != nil {
 		return err
 	}
@@ -134,11 +136,12 @@ func (s *Server) fileCallback(sc *ssh.ServerConfig) error {
 	return nil
 }
 
-func (s *Server) matchKeys(key ssh.PublicKey, keys map[string]string) error {
-	if cmt, exists := keys[string(key.Marshal())]; exists {
-		s.debugf("User '%s' authenticated with public key %s", cmt, fingerprint(key))
+func (s *Server) matchKeys(pubkey ssh.PublicKey, keys key.Map) error {
+	cmt, ok := keys[string(pubkey.Marshal())]
+	if ok {
+		s.debugf("User '%s' authenticated with public key %s", cmt, key.Fingerprint(pubkey))
 		return nil
 	}
-	s.debugf("User authentication failed with public key %s", fingerprint(key))
+	s.debugf("User authentication failed with public key %s", key.Fingerprint(pubkey))
 	return fmt.Errorf("denied")
 }
