@@ -22,6 +22,11 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 			s.config.Shell = "bash"
 		}
 	}
+	if s.config.WorkDir == "" {
+		if w, err := os.Getwd(); err == nil {
+			s.config.WorkDir = w
+		}
+	}
 	p, err := exec.LookPath(s.config.Shell)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find shell: %s", s.config.Shell)
@@ -101,6 +106,23 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 		return nil, fmt.Errorf("missing key authorization configuration")
 	}
 	return sc, nil
+}
+
+func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time, error) {
+	info, err := os.Stat(s.config.AuthType)
+	if err != nil {
+		return nil, last, fmt.Errorf("missing auth keys file")
+	}
+	t := info.ModTime()
+	if t.Before(last) || t.Equal(last) {
+		return nil, last, fmt.Errorf("not updated")
+	}
+	b, _ := os.ReadFile(s.config.AuthType)
+	keys, err := key.ParseKeys(b)
+	if err != nil {
+		return nil, last, err
+	}
+	return keys, t, nil
 }
 
 func (s *Server) githubCallback(username string, sc *ssh.ServerConfig) error {

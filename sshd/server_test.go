@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jpillora/sshd-lite/sshd"
+	"github.com/jpillora/sshd-lite/sshd/sshtest"
 )
 
 type testCase struct {
-	name   string
-	server *sshd.Config
-	client func(addr string) error
+	name    string
+	options []sshtest.ServerOption
+	client  func(addr string) error
 }
 
 func TestAll(t *testing.T) {
@@ -25,35 +25,33 @@ func TestAll(t *testing.T) {
 		tcpForwardingRemote,
 	} {
 		t.Run(fmt.Sprintf("#%d-%s", i+1, tc.name), func(t *testing.T) {
-			// test server
-			addr, serverDone := newTestServer(t.Context(), tc.server)
+			// Create and start test server
+			server, err := sshtest.NewServer(tc.options...)
+			if err != nil {
+				t.Fatalf("Failed to create server: %v", err)
+			}
+
+			if err := server.Start(t.Context()); err != nil {
+				t.Fatalf("Failed to start server: %v", err)
+			}
+			defer server.Stop()
+
+			addr := server.Addr()
 			t.Logf("Test server listening: %s", addr)
-			// test client
-			clientDone := make(chan error)
-			go func() {
-				clientDone <- tc.client(addr)
-			}()
-			// Wait for server to stop or timeout
-			select {
-			case err := <-serverDone:
-				// Server should stop cleanly when listener is closed
-				if err != nil {
-					t.Logf("Server stopped with: %v", err)
-				}
-			case err := <-clientDone:
-				if err != nil {
-					t.Errorf("Test case failed: %v", err)
-				} else {
-					t.Log("Test case passed")
-				}
+
+			// Run client test
+			if err := tc.client(addr); err != nil {
+				t.Errorf("Test case failed: %v", err)
+			} else {
+				t.Log("Test case passed")
 			}
 		})
 	}
 }
 
 var tcpCheck = testCase{
-	name:   "tcp-check",
-	server: &sshd.Config{},
+	name:    "tcp-check",
+	options: []sshtest.ServerOption{sshtest.ServerWithNoAuth()},
 	client: func(addr string) error {
 		// Test that we can connect to the port
 		conn, err := net.DialTimeout("tcp", addr, time.Second)
@@ -65,12 +63,10 @@ var tcpCheck = testCase{
 }
 
 var exec = testCase{
-	name: "exec",
-	server: &sshd.Config{
-		LogVerbose: true,
-	},
+	name:    "exec",
+	options: []sshtest.ServerOption{sshtest.ServerWithNoAuth()},
 	client: func(addr string) error {
-		c, err := createSSHClient(addr)
+		c, err := sshtest.CreateSSHClient(addr)
 		if err != nil {
 			return fmt.Errorf("failed to connect: %w", err)
 		}

@@ -1,0 +1,19 @@
+# Test environment variable handling
+name: environment variables
+description: Test that environment variables are properly set
+
+steps:
+  - client: test
+    actions:
+      - connect
+      - exec: "echo $HOME"
+    expect:
+      - output_match: "^/"
+      - exit_code: 0
+
+  - client: test
+    actions:
+      - exec: "echo $SHELL"
+    expect:
+      - output_match: "(bash|sh|zsh)"
+      - exit_code: 0

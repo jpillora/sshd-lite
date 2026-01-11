@@ -1,0 +1,13 @@
+# Basic echo command test
+name: echo command
+description: Test that echo command works via exec
+
+steps:
+  - client: test
+    actions:
+      - connect
+      - exec: "echo hello world"
+    expect:
+      - output: "hello world"
+      - exit_code: 0
+      - event: exec.completed

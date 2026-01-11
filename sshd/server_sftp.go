@@ -8,9 +8,18 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// NewSFTPHandler creates a new SFTP subsystem handler
+func NewSFTPHandler(s *Server) SubsystemHandler {
+	return func(channel ssh.Channel, req *Request) error {
+		s.debugf("SFTP subsystem request accepted")
+		go startSFTPServer(s, channel)
+		return nil
+	}
+}
+
 // startSFTPServer starts the SFTP server for the given connection.
-func (s *Server) startSFTPServer(connection ssh.Channel) {
-	defer connection.Close()
+func startSFTPServer(s *Server, channel ssh.Channel) {
+	defer channel.Close()
 	opts := []sftp.ServerOption{}
 	if d, err := os.UserHomeDir(); err == nil {
 		opts = append(opts, sftp.WithServerWorkingDirectory(d))
@@ -19,7 +28,7 @@ func (s *Server) startSFTPServer(connection ssh.Channel) {
 		opts = append(opts, sftp.WithDebug(os.Stderr))
 	}
 	sftpServer, err := sftp.NewServer(
-		connection,
+		channel,
 		opts...,
 	)
 	if err != nil {

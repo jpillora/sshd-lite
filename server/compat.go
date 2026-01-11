@@ -27,10 +27,13 @@ func SetWinsize(t FdHolder, w, h uint32) {
 
 // Deprecated: Use github.com/jpillora/sshd-lite/sshd.NewConfig instead.
 func NewConfig(keyFile string, keySeed string) *Config {
-	return sshd.NewConfig(keyFile, keySeed)
+	return &sshd.Config{
+		KeyFile: keyFile,
+		KeySeed: keySeed,
+	}
 }
 
 // Deprecated: Use github.com/jpillora/sshd-lite/sshd.NewServer instead.
 func NewServer(c *Config) (*Server, error) {
-	return sshd.NewServer(c)
+	return sshd.NewServer(*c)
 }

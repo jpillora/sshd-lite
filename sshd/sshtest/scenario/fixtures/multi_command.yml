@@ -1,0 +1,23 @@
+# Test multiple sequential commands
+name: multiple commands
+description: Test executing multiple commands in sequence
+
+steps:
+  - client: test
+    actions:
+      - connect
+      - exec: "echo first"
+    expect:
+      - output: "first"
+
+  - client: test
+    actions:
+      - exec: "echo second"
+    expect:
+      - output: "second"
+
+  - client: test
+    actions:
+      - exec: "echo third"
+    expect:
+      - output: "third"

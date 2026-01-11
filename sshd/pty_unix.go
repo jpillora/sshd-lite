@@ -21,6 +21,10 @@ func SetWinsize(t FdHolder, w, h uint32) {
 	ws := &pty.Winsize{Rows: uint16(h), Cols: uint16(w)}
 	// Type assert to *os.File since that's what creack/pty expects
 	if f, ok := t.(*os.File); ok {
-		pty.Setsize(f, ws)
+		// PTY resize errors are non-fatal - terminal continues with previous size
+		resizeErr := pty.Setsize(f, ws)
+		if resizeErr != nil {
+			// Error is intentionally ignored - PTY resize failures are non-fatal
+		}
 	}
 }

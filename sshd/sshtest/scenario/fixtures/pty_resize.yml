@@ -1,0 +1,18 @@
+# Test PTY resize functionality
+name: pty resize
+description: Test that PTY resize works correctly
+
+steps:
+  - client: test
+    actions:
+      - connect
+      - shell
+      - resize:
+          cols: 120
+          rows: 40
+      - sleep: 100ms
+      - line: "echo resized"
+      - sleep: 200ms
+    expect:
+      - output: "resized"
+      - event: pty.resized

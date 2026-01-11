@@ -1,0 +1,15 @@
+# Test special key handling in shell
+name: shell key handling
+description: Test that special keys work in interactive shell
+
+steps:
+  - client: test
+    actions:
+      - connect
+      - shell
+      - input: "echo partial"
+      - key: Enter
+      - sleep: 200ms
+    expect:
+      - output: "partial"
+      - event: pty.requested

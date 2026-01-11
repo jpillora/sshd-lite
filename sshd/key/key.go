@@ -87,6 +87,38 @@ func Fingerprint(k ssh.PublicKey) string {
 	return "SHA256:" + b64
 }
 
+// SignerFromSeed generates a deterministic SSH signer from a seed string.
+// Uses ed25519 for fast key generation. The same seed always produces the same key.
+func SignerFromSeed(seed string) (ssh.Signer, error) {
+	keyBytes, err := GenerateKey(seed, true) // ed25519
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate key: %w", err)
+	}
+	signer, err := ssh.ParsePrivateKey(keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %w", err)
+	}
+	return signer, nil
+}
+
+// PublicKeyFromSeed generates a deterministic SSH public key from a seed string.
+func PublicKeyFromSeed(seed string) (ssh.PublicKey, error) {
+	signer, err := SignerFromSeed(seed)
+	if err != nil {
+		return nil, err
+	}
+	return signer.PublicKey(), nil
+}
+
+// AuthorizedKeyEntry returns an authorized_keys line for a seed.
+func AuthorizedKeyEntry(seed string) (string, error) {
+	pubKey, err := PublicKeyFromSeed(seed)
+	if err != nil {
+		return "", err
+	}
+	return string(ssh.MarshalAuthorizedKey(pubKey)), nil
+}
+
 const DetermRandIter = 2048
 
 func NewDetermRand(seed []byte) io.Reader {

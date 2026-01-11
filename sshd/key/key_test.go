@@ -194,3 +194,75 @@ func TestConfigAuthKeys(t *testing.T) {
 		t.Fatal("AuthKeys should be empty when not set")
 	}
 }
+
+func TestSignerFromSeed(t *testing.T) {
+	t.Parallel()
+
+	// Same seed should produce same signer
+	signer1, err := key.SignerFromSeed("test-seed")
+	if err != nil {
+		t.Fatalf("failed to generate signer: %v", err)
+	}
+
+	signer2, err := key.SignerFromSeed("test-seed")
+	if err != nil {
+		t.Fatalf("failed to generate signer: %v", err)
+	}
+
+	// Compare public keys
+	pub1 := signer1.PublicKey().Marshal()
+	pub2 := signer2.PublicKey().Marshal()
+
+	if string(pub1) != string(pub2) {
+		t.Error("same seed should produce same signer")
+	}
+
+	// Different seed should produce different signer
+	signer3, err := key.SignerFromSeed("different-seed")
+	if err != nil {
+		t.Fatalf("failed to generate signer: %v", err)
+	}
+
+	pub3 := signer3.PublicKey().Marshal()
+	if string(pub1) == string(pub3) {
+		t.Error("different seeds should produce different signers")
+	}
+}
+
+func TestPublicKeyFromSeed(t *testing.T) {
+	t.Parallel()
+
+	pubKey, err := key.PublicKeyFromSeed("test-seed")
+	if err != nil {
+		t.Fatalf("failed to generate public key: %v", err)
+	}
+
+	if pubKey == nil {
+		t.Fatal("public key should not be nil")
+	}
+
+	// Verify it matches signer's public key
+	signer, _ := key.SignerFromSeed("test-seed")
+	if string(pubKey.Marshal()) != string(signer.PublicKey().Marshal()) {
+		t.Error("public key should match signer's public key")
+	}
+}
+
+func TestAuthorizedKeyEntry(t *testing.T) {
+	t.Parallel()
+
+	entry, err := key.AuthorizedKeyEntry("test-seed")
+	if err != nil {
+		t.Fatalf("failed to generate authorized key entry: %v", err)
+	}
+
+	if entry == "" {
+		t.Fatal("entry should not be empty")
+	}
+
+	// Should be parseable
+	_, _, _, _, err = ssh.ParseAuthorizedKey([]byte(entry))
+	if err != nil {
+		t.Fatalf("entry should be parseable: %v", err)
+	}
+}

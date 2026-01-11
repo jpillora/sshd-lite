@@ -1,0 +1,14 @@
+# Basic interactive shell test
+name: interactive shell
+description: Test basic shell interaction with echo command
+
+steps:
+  - client: test
+    actions:
+      - connect
+      - shell
+      - line: "echo shell-test"
+      - sleep: 200ms
+    expect:
+      - output: "shell-test"
+      - event: shell.started

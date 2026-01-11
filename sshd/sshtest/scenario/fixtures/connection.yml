@@ -1,0 +1,24 @@
+# Test connection lifecycle
+name: connection lifecycle
+description: Test connect and disconnect behavior
+
+steps:
+  - client: test
+    actions:
+      - connect
+    expect:
+      - connected
+      - event: connected
+
+  - client: test
+    actions:
+      - exec: "echo connected"
+    expect:
+      - output: "connected"
+
+  - client: test
+    actions:
+      - disconnect
+    expect:
+      - disconnected
+      - event: disconnected

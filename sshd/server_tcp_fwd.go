@@ -24,33 +24,15 @@ func NewTCPForwardingHandler(server *Server) *TCPForwardingHandler {
 	}
 }
 
-// HandleGlobalRequest handles global SSH requests for TCP forwarding
-func (h *TCPForwardingHandler) HandleGlobalRequest(req *ssh.Request, conn ssh.Conn) {
-	switch req.Type {
-	case "tcpip-forward":
-		h.handleTCPIPForward(req, conn)
-	case "cancel-tcpip-forward":
-		h.handleCancelTCPIPForward(req, conn)
-	default:
-		if req.WantReply {
-			req.Reply(false, nil)
-		}
-	}
-}
-
-// handleTCPIPForward handles reverse port forwarding requests
-func (h *TCPForwardingHandler) handleTCPIPForward(req *ssh.Request, conn ssh.Conn) {
+// handleTCPIPForward handles reverse port forwarding requests (global request)
+func (h *TCPForwardingHandler) handleTCPIPForward(conn ssh.Conn, req *Request) error {
 	var payload struct {
 		Host string
 		Port uint32
 	}
 
 	if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
-		h.server.debugf("Failed to unmarshal tcpip-forward request: %v", err)
-		if req.WantReply {
-			req.Reply(false, nil)
-		}
-		return
+		return fmt.Errorf("failed to unmarshal tcpip-forward request: %w", err)
 	}
 
 	// Bind to the requested address
@@ -59,11 +41,7 @@ func (h *TCPForwardingHandler) handleTCPIPForward(req *ssh.Request, conn ssh.Con
 
 	listener, err := net.Listen("tcp", bindAddr)
 	if err != nil {
-		h.server.debugf("Failed to listen on %s: %v", bindAddr, err)
-		if req.WantReply {
-			req.Reply(false, nil)
-		}
-		return
+		return fmt.Errorf("failed to listen on %s: %w", bindAddr, err)
 	}
 
 	// Store the listener
@@ -74,35 +52,34 @@ func (h *TCPForwardingHandler) handleTCPIPForward(req *ssh.Request, conn ssh.Con
 	// Get the actual port if 0 was requested
 	actualPort := uint32(listener.Addr().(*net.TCPAddr).Port)
 
-	// Reply with the actual port
+	// Reply with the actual port (handler is responsible for reply on success)
 	if req.WantReply {
-		portBytes := make([]byte, 4)
-		portBytes[0] = byte(actualPort >> 24)
-		portBytes[1] = byte(actualPort >> 16)
-		portBytes[2] = byte(actualPort >> 8)
-		portBytes[3] = byte(actualPort)
-		req.Reply(true, portBytes)
+		if err := req.Reply(true, []byte{
+			byte(actualPort >> 24),
+			byte(actualPort >> 16),
+			byte(actualPort >> 8),
+			byte(actualPort >> 0),
+		}); err != nil {
+			h.server.errorf("Failed to reply to TCP forwarding request: %s", err)
+		}
 	}
 
 	h.server.debugf("Reverse forwarding established on %s (actual port: %d)", bindAddr, actualPort)
 
 	// Start accepting connections
 	go h.acceptReverseConnections(listener, conn, payload.Host, actualPort)
+	return nil
 }
 
-// handleCancelTCPIPForward handles cancellation of reverse port forwarding
-func (h *TCPForwardingHandler) handleCancelTCPIPForward(req *ssh.Request, conn ssh.Conn) {
+// handleCancelTCPIPForward handles cancellation of reverse port forwarding (global request)
+func (h *TCPForwardingHandler) handleCancelTCPIPForward(conn ssh.Conn, req *Request) error {
 	var payload struct {
 		Host string
 		Port uint32
 	}
 
 	if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
-		h.server.debugf("Failed to unmarshal cancel-tcpip-forward request: %v", err)
-		if req.WantReply {
-			req.Reply(false, nil)
-		}
-		return
+		return fmt.Errorf("failed to unmarshal cancel-tcpip-forward request: %w", err)
 	}
 
 	bindAddr := net.JoinHostPort(payload.Host, fmt.Sprintf("%d", payload.Port))
@@ -115,18 +92,70 @@ func (h *TCPForwardingHandler) handleCancelTCPIPForward(req *ssh.Request, conn s
 	}
 	h.listenersMu.Unlock()
 
-	if exists {
-		listener.Close()
-		h.server.debugf("Cancelled reverse forwarding for %s", bindAddr)
-		if req.WantReply {
-			req.Reply(true, nil)
-		}
-	} else {
-		h.server.debugf("No reverse forwarding found for %s", bindAddr)
-		if req.WantReply {
-			req.Reply(false, nil)
+	if !exists {
+		return fmt.Errorf("no reverse forwarding found for %s", bindAddr)
+	}
+
+	listener.Close()
+	h.server.debugf("Cancelled reverse forwarding for %s", bindAddr)
+
+	// Reply success (handler is responsible for reply on success)
+	if req.WantReply {
+		if err := req.Reply(true, nil); err != nil {
+			h.server.errorf("Failed to reply to TCP forwarding cancel request: %s", err)
 		}
 	}
+	return nil
+}
+
+// HandleDirectTCPIP handles direct TCP/IP forwarding (local forwarding) - channel handler
+func (h *TCPForwardingHandler) HandleDirectTCPIP(newChannel ssh.NewChannel) error {
+	var payload struct {
+		Host       string
+		Port       uint32
+		OriginHost string
+		OriginPort uint32
+	}
+
+	if err := ssh.Unmarshal(newChannel.ExtraData(), &payload); err != nil {
+		if rejectErr := newChannel.Reject(ssh.ConnectionFailed, "Invalid payload"); rejectErr != nil {
+			h.server.errorf("Failed to reject channel with invalid payload: %s", rejectErr)
+		}
+		return fmt.Errorf("failed to unmarshal direct-tcpip request: %w", err)
+	}
+
+	destAddr := net.JoinHostPort(payload.Host, fmt.Sprintf("%d", payload.Port))
+	h.server.debugf("Direct TCP forwarding request to %s from %s:%d", destAddr, payload.OriginHost, payload.OriginPort)
+
+	// Connect to the target
+	tcpConn, err := net.Dial("tcp", destAddr)
+	if err != nil {
+		if rejectErr := newChannel.Reject(ssh.ConnectionFailed, fmt.Sprintf("Failed to connect to %s", destAddr)); rejectErr != nil {
+			h.server.errorf("Failed to reject channel for connection to %s: %s", destAddr, rejectErr)
+		}
+		return fmt.Errorf("failed to connect to %s: %w", destAddr, err)
+	}
+
+	// Accept the channel
+	channel, reqs, err := newChannel.Accept()
+	if err != nil {
+		tcpConn.Close()
+		return fmt.Errorf("failed to accept direct-tcpip channel: %w", err)
+	}
+
+	// Discard any requests on this channel
+	go ssh.DiscardRequests(reqs)
+
+	h.server.debugf("Direct TCP forwarding established to %s", destAddr)
+
+	// Pipe data between the SSH channel and TCP connection
+	go func() {
+		defer channel.Close()
+		defer tcpConn.Close()
+		h.pipeConnections(channel, tcpConn)
+	}()
+
+	return nil
 }
 
 // acceptReverseConnections accepts incoming connections for reverse forwarding
@@ -179,50 +208,6 @@ func (h *TCPForwardingHandler) handleReverseConnection(tcpConn net.Conn, sshConn
 	h.pipeConnections(tcpConn, channel)
 }
 
-// HandleDirectTCPIP handles direct TCP/IP forwarding (local forwarding)
-func (h *TCPForwardingHandler) HandleDirectTCPIP(newChannel ssh.NewChannel) {
-	var payload struct {
-		Host       string
-		Port       uint32
-		OriginHost string
-		OriginPort uint32
-	}
-
-	if err := ssh.Unmarshal(newChannel.ExtraData(), &payload); err != nil {
-		h.server.debugf("Failed to unmarshal direct-tcpip request: %v", err)
-		newChannel.Reject(ssh.ConnectionFailed, "Invalid payload")
-		return
-	}
-
-	destAddr := net.JoinHostPort(payload.Host, fmt.Sprintf("%d", payload.Port))
-	h.server.debugf("Direct TCP forwarding request to %s from %s:%d", destAddr, payload.OriginHost, payload.OriginPort)
-
-	// Connect to the target
-	tcpConn, err := net.Dial("tcp", destAddr)
-	if err != nil {
-		h.server.debugf("Failed to connect to %s: %v", destAddr, err)
-		newChannel.Reject(ssh.ConnectionFailed, fmt.Sprintf("Failed to connect to %s", destAddr))
-		return
-	}
-	defer tcpConn.Close()
-
-	// Accept the channel
-	channel, reqs, err := newChannel.Accept()
-	if err != nil {
-		h.server.debugf("Failed to accept direct-tcpip channel: %v", err)
-		return
-	}
-	defer channel.Close()
-
-	// Discard any requests on this channel
-	go ssh.DiscardRequests(reqs)
-
-	h.server.debugf("Direct TCP forwarding established to %s", destAddr)
-
-	// Pipe data between the SSH channel and TCP connection
-	h.pipeConnections(channel, tcpConn)
-}
-
 // pipeConnections pipes data between two connections
 func (h *TCPForwardingHandler) pipeConnections(conn1 io.ReadWriteCloser, conn2 io.ReadWriteCloser) {
 	var wg sync.WaitGroup
@@ -231,18 +216,26 @@ func (h *TCPForwardingHandler) pipeConnections(conn1 io.ReadWriteCloser, conn2 i
 	// Copy from conn1 to conn2
 	go func() {
 		defer wg.Done()
-		io.Copy(conn2, conn1)
+		if _, err := io.Copy(conn2, conn1); err != nil {
+			h.server.debugf("Error copying from conn1 to conn2: %s", err)
+		}
 		if closer, ok := conn2.(interface{ CloseWrite() error }); ok {
-			closer.CloseWrite()
+			if err := closer.CloseWrite(); err != nil {
+				h.server.debugf("Error closing write on conn2: %s", err)
+			}
 		}
 	}()
 
 	// Copy from conn2 to conn1
 	go func() {
 		defer wg.Done()
-		io.Copy(conn1, conn2)
+		if _, err := io.Copy(conn1, conn2); err != nil {
+			h.server.debugf("Error copying from conn2 to conn1: %s", err)
+		}
 		if closer, ok := conn1.(interface{ CloseWrite() error }); ok {
-			closer.CloseWrite()
+			if err := closer.CloseWrite(); err != nil {
+				h.server.debugf("Error closing write on conn1: %s", err)
+			}
 		}
 	}()
 

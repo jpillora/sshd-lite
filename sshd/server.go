@@ -2,31 +2,27 @@ package sshd
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/jpillora/jplog"
-	"github.com/jpillora/sshd-lite/sshd/key"
 	"golang.org/x/crypto/ssh"
 )
 
 // Server is a simple SSH Daemon
 type Server struct {
-	config               *Config
-	sshConfig            *ssh.ServerConfig
-	tcpForwardingHandler *TCPForwardingHandler
+	config                 Config
+	sshConfig              *ssh.ServerConfig
+	globalRequestHandlers  map[string]GlobalRequestHandler
+	channelHandlers        map[string]ChannelHandler
+	sessionRequestHandlers map[string]SessionRequestHandler
+	subsystemHandlers      map[string]SubsystemHandler
 }
 
 // NewServer creates a new Server
-func NewServer(c *Config) (*Server, error) {
+func NewServer(c Config) (*Server, error) {
 	if l := c.Logger; l == nil && !c.LogQuiet {
 		h := jplog.Handler(os.Stdout)
 		if c.LogVerbose {
@@ -41,7 +37,57 @@ func NewServer(c *Config) (*Server, error) {
 		return nil, err
 	}
 	s.sshConfig = sc
-
+	// initialize handler maps
+	s.globalRequestHandlers = map[string]GlobalRequestHandler{}
+	s.channelHandlers = map[string]ChannelHandler{}
+	s.sessionRequestHandlers = map[string]SessionRequestHandler{}
+	s.subsystemHandlers = map[string]SubsystemHandler{}
+	// register built-in session handlers
+	s.sessionRequestHandlers["pty-req"] = handlePtyReq
+	s.sessionRequestHandlers["window-change"] = handleWindowChange
+	s.sessionRequestHandlers["env"] = handleEnv
+	s.sessionRequestHandlers["shell"] = handleShell
+	s.sessionRequestHandlers["exec"] = handleExec
+	// register built-in channel handler
+	s.channelHandlers["session"] = s.handleSessionChannel
+	// register TCP forwarding handlers if enabled
+	if c.TCPForwarding {
+		tfh := NewTCPForwardingHandler(s)
+		s.globalRequestHandlers["tcpip-forward"] = tfh.handleTCPIPForward
+		s.globalRequestHandlers["cancel-tcpip-forward"] = tfh.handleCancelTCPIPForward
+		s.channelHandlers["direct-tcpip"] = tfh.HandleDirectTCPIP
+		s.infof("TCP forwarding enabled")
+	}
+	// register SFTP subsystem if enabled
+	if c.SFTP {
+		s.subsystemHandlers["sftp"] = NewSFTPHandler(s)
+		s.infof("SFTP enabled")
+	}
+	// merge custom handlers from config (fail on clash with built-in)
+	for name, h := range c.GlobalRequestHandlers {
+		if _, exists := s.globalRequestHandlers[name]; exists {
+			return nil, fmt.Errorf("global request handler %q already registered", name)
+		}
+		s.globalRequestHandlers[name] = h
+	}
+	for name, h := range c.ChannelHandlers {
+		if _, exists := s.channelHandlers[name]; exists {
+			return nil, fmt.Errorf("channel handler %q already registered", name)
+		}
+		s.channelHandlers[name] = h
+	}
+	for name, h := range c.SessionRequestHandlers {
+		if _, exists := s.sessionRequestHandlers[name]; exists {
+			return nil, fmt.Errorf("session request handler %q already registered", name)
+		}
+		s.sessionRequestHandlers[name] = h
+	}
+	for name, h := range c.SubsystemHandlers {
+		if _, exists := s.subsystemHandlers[name]; exists {
+			return nil, fmt.Errorf("subsystem handler %q already registered", name)
+		}
+		s.subsystemHandlers[name] = h
+	}
 	return s, nil
 }
 
@@ -59,10 +105,8 @@ func (s *Server) StartContext(ctx context.Context) error {
 
 	//listen
 	if p == "" {
-		p = "22"
 		l, err = net.Listen("tcp", h+":22")
 		if err != nil {
-			p = "2200"
 			l, err = net.Listen("tcp", h+":2200")
 			if err != nil {
 				return fmt.Errorf("failed to listen on 22 and 2200")
@@ -89,13 +133,6 @@ func (s *Server) StartWith(l net.Listener) error {
 // Ignores the Host and Port in the config.
 func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
 	defer l.Close()
-	if s.config.SFTP {
-		s.infof("SFTP enabled")
-	}
-	if s.config.TCPForwarding {
-		s.tcpForwardingHandler = NewTCPForwardingHandler(s)
-		s.infof("TCP forwarding enabled")
-	}
 	// Accept all connections
 	s.infof("Listening on %s...", l.Addr())
 	// Close listener when context is cancelled
@@ -114,278 +151,8 @@ func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
 			s.errorf("Failed to accept incoming connection (%s)", err)
 			continue
 		}
-		go s.handleConn(tcpConn)
+		go s.HandleConn(tcpConn)
 	}
-}
-
-func (s *Server) handleConn(tcpConn net.Conn) {
-	// Before use, a handshake must be performed on the incoming net.Conn.
-	sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, s.sshConfig)
-	if err != nil {
-		if err != io.EOF {
-			s.errorf("Failed to handshake (%s)", err)
-		}
-		return
-	}
-	s.debugf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
-
-	// Handle global requests (for TCP forwarding)
-	if s.config.TCPForwarding && s.tcpForwardingHandler != nil {
-		go s.handleGlobalRequests(reqs, sshConn)
-	} else {
-		// Discard all global out-of-band Requests if TCP forwarding is disabled
-		go ssh.DiscardRequests(reqs)
-	}
-
-	// Accept all channels
-	go s.handleChannels(chans)
-}
-
-func (s *Server) handleChannels(chans <-chan ssh.NewChannel) {
-	// Service the incoming Channel channel in go routine
-	for newChannel := range chans {
-		go s.handleChannel(newChannel)
-	}
-}
-
-func (s *Server) handleChannel(newChannel ssh.NewChannel) {
-	channelType := newChannel.ChannelType()
-	s.debugf("Channel request '%s'", channelType)
-
-	switch channelType {
-	case "session":
-		// Handle regular SSH sessions
-		if d := newChannel.ExtraData(); len(d) > 0 {
-			s.debugf("Channel data: '%s' %x", d, d)
-		}
-
-		connection, requests, err := newChannel.Accept()
-		if err != nil {
-			s.debugf("Could not accept channel (%s)", err)
-			return
-		}
-		s.debugf("Channel accepted")
-		go s.handleRequests(connection, requests)
-
-	case "direct-tcpip":
-		// Handle direct TCP/IP forwarding (local forwarding)
-		if s.config.TCPForwarding && s.tcpForwardingHandler != nil {
-			go s.tcpForwardingHandler.HandleDirectTCPIP(newChannel)
-		} else {
-			s.debugf("direct-tcpip request received but TCP forwarding is disabled")
-			newChannel.Reject(ssh.Prohibited, "TCP forwarding is disabled")
-		}
-
-	default:
-		s.debugf("Unknown channel type: %s", channelType)
-		newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", channelType))
-	}
-}
-
-func (s *Server) handleRequests(connection ssh.Channel, requests <-chan *ssh.Request) {
-	// start keep alive loop
-	if ka := s.config.KeepAlive; ka > 0 {
-		ticking := make(chan bool, 1)
-		interval := time.Duration(ka) * time.Second
-		go s.keepAlive(connection, interval, ticking)
-		defer close(ticking)
-	}
-	// prepare to handle client requests
-	env := os.Environ()
-	resizes := make(chan []byte, 10)
-	defer close(resizes)
-	// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
-	for req := range requests {
-		s.debugf("Request type: %s", req.Type)
-		switch req.Type {
-		case "pty-req":
-			termLen := req.Payload[3]
-			resizes <- req.Payload[termLen+4:]
-			// Responding true (OK) here will let the client
-			// know we have a pty ready
-			s.debugf("pty ready")
-			req.Reply(true, nil)
-		case "window-change":
-			resizes <- req.Payload
-		case "env":
-			e := struct{ Name, Value string }{}
-			ssh.Unmarshal(req.Payload, &e)
-			kv := e.Name + "=" + e.Value
-			s.debugf("env: %s", kv)
-			if !s.config.IgnoreEnv {
-				env = appendEnv(env, kv)
-			}
-		case "shell":
-			// Responding true (OK) here will let the client
-			// know we have attached the shell (pty) to the connection
-			if len(req.Payload) > 0 {
-				s.debugf("shell command ignored '%s'", req.Payload)
-			}
-			err := s.attachShell(connection, env, resizes)
-			if err != nil {
-				s.debugf("exec shell: %s", err)
-			}
-			req.Reply(err == nil, nil)
-		case "exec":
-			ok := s.handleExecRequest(connection, req, env)
-			req.Reply(ok, nil)
-		case "subsystem":
-			ok := s.handleSubsystemRequest(connection, req)
-			req.Reply(ok, nil)
-			if !ok {
-				connection.Close()
-			}
-		default:
-			s.debugf("unkown request: %s (reply: %v, data: %x)", req.Type, req.WantReply, req.Payload)
-		}
-	}
-	s.debugf("Closing handler for requests")
-}
-
-// handleSubsystemRequest handles 'subsystem' requests from the client.
-func (s *Server) handleSubsystemRequest(connection ssh.Channel, req *ssh.Request) bool {
-	// https://datatracker.ietf.org/doc/html/rfc4254#section-6.5
-	// subsystem name is a string encoded as: [uint32 length][string name]
-	if len(req.Payload) < 4 {
-		s.debugf("Malformed subsystem request payload")
-		return false
-	}
-	length := binary.BigEndian.Uint32(req.Payload)
-	match := uint32(len(req.Payload)-4) == length
-	if !match {
-		s.debugf("Subsystem name length mismatch in payload")
-		return false
-	}
-	subsystem := string(req.Payload[4:])
-	switch subsystem {
-	case "sftp":
-		return s.handleSFTP(connection, req)
-	default:
-		s.debugf("Unsupported subsystem requested: %q", subsystem)
-		return false
-	}
-}
-
-func (s *Server) handleSFTP(connection ssh.Channel, _ *ssh.Request) bool {
-	if !s.config.SFTP { // Check if SFTP is enabled in config
-		s.debugf("SFTP subsystem request received but SFTP is disabled")
-		return false
-	}
-	// req.Reply(false, []byte("SFTP is disabled on this server"))
-	s.debugf("SFTP subsystem request accepted")
-	go s.startSFTPServer(connection)
-	return true
-}
-
-func (s *Server) keepAlive(connection ssh.Channel, interval time.Duration, ticking <-chan bool) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			_, err := connection.SendRequest("ping", false, nil)
-			if err != nil {
-				s.debugf("failed to send keep alive ping: %s", err)
-			}
-			s.debugf("sent keep alive ping")
-		case <-ticking:
-			return
-		}
-	}
-}
-
-func (s *Server) attachShell(connection ssh.Channel, env []string, resizes <-chan []byte) error {
-	shell := exec.Command(s.config.Shell)
-	setSysProcAttr(shell)
-	if !hasEnv(env, "TERM") {
-		env = append(env, "TERM=xterm-256color")
-	}
-	shell.Env = env
-	s.debugf("Session env: %v", env)
-
-	close := func() {
-		connection.Close()
-		if shell.Process != nil {
-			signalErr := shell.Process.Signal(os.Interrupt)
-			if signalErr != nil && !strings.Contains(signalErr.Error(), "process already finished") && !strings.Contains(signalErr.Error(), "already exited") && !strings.Contains(signalErr.Error(), "not supported") {
-				s.errorf("Failed to interrupt shell: %s", signalErr)
-			}
-			time.Sleep(100 * time.Millisecond)
-			killErr := shell.Process.Kill()
-			if killErr != nil && !strings.Contains(killErr.Error(), "process already finished") && !strings.Contains(killErr.Error(), "already exited") && !strings.Contains(killErr.Error(), "not supported") {
-				s.errorf("Failed to kill shell: %s", killErr)
-			}
-			shell.Process.Wait()
-		}
-		s.debugf("Session closed")
-	}
-	//start a shell for this channel's connection
-	shellf, err := startPTY(shell)
-	if err != nil {
-		close()
-		return fmt.Errorf("could not start pty (%s)", err)
-	}
-	//dequeue resizes
-	go func() {
-		for payload := range resizes {
-			w, h := parseDims(payload)
-			SetWinsize(shellf, w, h)
-		}
-	}()
-	//pipe session to shell and visa-versa
-	var once sync.Once
-	go func() {
-		_, err := io.Copy(connection, shellf)
-		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
-			s.debugf("Shell to connection copy error: %s", err)
-		}
-		once.Do(close)
-	}()
-	go func() {
-		_, err := io.Copy(shellf, connection)
-		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
-			s.debugf("Connection to shell copy error: %s", err)
-		}
-		once.Do(close)
-	}()
-	//
-	s.debugf("shell attached")
-	go func() {
-		// Start proactively listening for process death, for those ptys that
-		// don't signal on EOF.
-		if shell.Process != nil {
-			_, err := shell.Process.Wait()
-			if err != nil {
-				if !strings.Contains(err.Error(), "wait: no child processes") && !strings.Contains(err.Error(), "exit status") && !strings.Contains(err.Error(), "Wait was already called") {
-					s.errorf("Shell process wait error: (%s)", err)
-				}
-			}
-			// It appears that closing the pty is an idempotent operation
-			// therefore making this call ensures that the other two coroutines
-			// will fall through and exit, and there is no downside.
-			shellf.Close() // Close the pty file descriptor
-		}
-		s.debugf("Shell terminated")
-		once.Do(close) // Ensure connection is closed when shell exits
-	}()
-	return nil
-}
-
-func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time, error) {
-	info, err := os.Stat(s.config.AuthType)
-	if err != nil {
-		return nil, last, fmt.Errorf("missing auth keys file")
-	}
-	t := info.ModTime()
-	if t.Before(last) || t.Equal(last) {
-		return nil, last, fmt.Errorf("not updated")
-	}
-	b, _ := os.ReadFile(s.config.AuthType)
-	keys, err := key.ParseKeys(b)
-	if err != nil {
-		return nil, last, err
-	}
-	return keys, t, nil
 }
 
 func (s *Server) debugf(f string, args ...interface{}) {
@@ -405,90 +172,4 @@ func (s *Server) errorf(f string, args ...interface{}) {
 	if !s.config.LogQuiet {
 		s.config.Logger.Error(fmt.Sprintf(f, args...))
 	}
-}
-
-func appendEnv(env []string, kv string) []string {
-	p := strings.SplitN(kv, "=", 2)
-	k := p[0] + "="
-	for i, e := range env {
-		if strings.HasPrefix(e, k) {
-			env[i] = kv
-			return env
-		}
-	}
-	return append(env, kv)
-}
-
-func hasEnv(env []string, key string) bool {
-	k := key + "="
-	for _, e := range env {
-		if strings.HasPrefix(e, k) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Server) handleGlobalRequests(reqs <-chan *ssh.Request, conn ssh.Conn) {
-	for req := range reqs {
-		s.debugf("Global request: %s", req.Type)
-		if s.tcpForwardingHandler != nil {
-			s.tcpForwardingHandler.HandleGlobalRequest(req, conn)
-		} else {
-			if req.WantReply {
-				req.Reply(false, nil)
-			}
-		}
-	}
-}
-
-// handleExecRequest handles 'exec' requests from the client.
-func (s *Server) handleExecRequest(connection ssh.Channel, req *ssh.Request, env []string) bool {
-	// https://datatracker.ietf.org/doc/html/rfc4254#section-6.5
-	// command name is a string encoded as: [uint32 length][string command]
-	if len(req.Payload) < 4 {
-		s.debugf("Malformed exec request payload")
-		return false
-	}
-	length := binary.BigEndian.Uint32(req.Payload)
-	if uint32(len(req.Payload)-4) != length {
-		s.debugf("Command length mismatch in payload")
-		return false
-	}
-	command := string(req.Payload[4:])
-	s.debugf("exec command: %s", command)
-
-	// Execute the command
-	go s.executeCommand(connection, command, env)
-	return true
-}
-
-// executeCommand executes a shell command and pipes the output to the SSH connection
-func (s *Server) executeCommand(connection ssh.Channel, command string, env []string) {
-	defer connection.Close()
-	// Use shell to execute the command
-	cmd := exec.Command(s.config.Shell, "-c", command)
-	setSysProcAttr(cmd)
-	cmd.Env = env          // TODO: append?
-	cmd.Stdin = connection // Connect stdin to the SSH channel
-	cmd.Stdout = connection
-	cmd.Stderr = connection
-	// capture exit status
-	type exit struct {
-		Status uint32
-	}
-	status := exit{Status: 0}
-	// Run the command
-	err := cmd.Run()
-	if err != nil {
-		s.debugf("Command execution failed: %s", err)
-		// Send exit status
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			// Send exit status to client
-			status := exit{Status: uint32(exitErr.ExitCode())}
-			connection.SendRequest("exit-status", false, ssh.Marshal(&status))
-		}
-	}
-	s.debugf("Command execution completed")
-	connection.SendRequest("exit-status", false, ssh.Marshal(&status))
 }

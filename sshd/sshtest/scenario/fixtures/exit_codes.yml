@@ -1,0 +1,26 @@
+# Test various exit codes
+name: exit codes
+description: Test that exit codes are properly returned
+
+steps:
+  # Test successful command
+  - client: test
+    actions:
+      - connect
+      - exec: "exit 0"
+    expect:
+      - exit_code: 0
+
+  # Test failure exit code
+  - client: test
+    actions:
+      - exec: "exit 42"
+    expect:
+      - exit_code: 42
+
+  # Test command that fails
+  - client: test
+    actions:
+      - exec: "false"
+    expect:
+      - exit_code: 1

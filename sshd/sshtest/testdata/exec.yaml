@@ -1,0 +1,11 @@
+name: exec
+description: Execute a command and verify output
+
+steps:
+  - client: test
+    actions:
+      - connect
+      - exec: "echo helloworld"
+    expect:
+      - stdout: "helloworld"
+      - exit_code: 0

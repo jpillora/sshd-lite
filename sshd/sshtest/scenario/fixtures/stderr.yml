@@ -1,0 +1,19 @@
+# Test stderr output handling
+name: stderr handling
+description: Test that stderr is properly captured
+
+steps:
+  - client: test
+    actions:
+      - connect
+      - exec: "echo error >&2"
+    expect:
+      - stderr: "error"
+      - exit_code: 0
+
+  - client: test
+    actions:
+      - exec: "echo stdout; echo stderr >&2"
+    expect:
+      - stdout: "stdout"
+      - stderr: "stderr"

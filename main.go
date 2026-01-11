@@ -14,13 +14,15 @@ import (
 
 var version string = "0.0.0-src" //set via ldflags
 
-const notes = `
+const authArg = `
 <auth> must be set to one of:
 1. a username and password string separated by a colon ("myuser:mypass")
 2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
 3. an authorized github user ("github.com/myuser") public keys from .keys
 4. "none" to disable client authentication :WARNING: very insecure
+`
 
+const notes = `
 Notes:
 * if no keyfile and no keyseed are set, a random RSA2048 key is used
 * authorized_key files are automatically reloaded on change
@@ -32,17 +34,18 @@ Notes:
 `
 
 func main() {
-	c := &sshd.Config{
+	c := sshd.Config{
 		Host:      "0.0.0.0",
 		KeepAlive: 60,
 	}
 
-	opts.New(c).
+	opts.New(&c).
 		Name("sshd-lite").
 		Version(version).
 		Repo("github.com/jpillora/sshd-lite").
 		PkgRepo().
-		DocAfter("args", "notes", notes).
+		DocAfter("args", "authArg", authArg).
+		DocBefore("version", "notes", notes).
 		Parse()
 
 	s, err := sshd.NewServer(c)

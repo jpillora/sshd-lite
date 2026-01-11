@@ -1,0 +1,11 @@
+# Test authentication events
+name: authentication events
+description: Verify authentication events are emitted correctly
+
+steps:
+  - client: test
+    actions:
+      - connect
+    expect:
+      - connected
+      - event: auth.success

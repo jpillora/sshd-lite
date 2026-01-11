@@ -7,26 +7,27 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jpillora/sshd-lite/sshd"
+	"github.com/jpillora/sshd-lite/sshd/sshtest"
+	"github.com/jpillora/sshd-lite/sshd/xhttp"
+	"github.com/jpillora/sshd-lite/sshd/xnet"
 )
 
 var tcpForwardingLocal = testCase{
 	name: "tcp-forwarding-local",
-	server: &sshd.Config{
-		TCPForwarding: true,
-		LogVerbose:    true,
+	options: []sshtest.ServerOption{
+		sshtest.ServerWithNoAuth(),
+		sshtest.ServerWithTCPForwarding(true),
 	},
 	client: func(addr string) error {
 		// 1. Start a test HTTP server
-		httpListener, httpServer, httpAddr, err := createTestHTTPServer("foo")
+		httpServer, err := xhttp.NewTestServer("foo")
 		if err != nil {
 			return err
 		}
-		defer httpListener.Close()
 		defer httpServer.Close()
 
 		// 2. Connect to SSH server
-		c, err := createSSHClient(addr)
+		c, err := sshtest.CreateSSHClient(addr)
 		if err != nil {
 			return fmt.Errorf("failed to connect to ssh: %w", err)
 		}
@@ -37,7 +38,7 @@ var tcpForwardingLocal = testCase{
 		// - We ask the SSH server to listen on a port
 		// - When connections come in, the server forwards them back to us
 		// - We then forward them to our local HTTP server
-		localPort, err := getRandomPort()
+		localPort, err := xnet.GetRandomPort()
 		if err != nil {
 			return fmt.Errorf("failed to get random port: %w", err)
 		}
@@ -57,30 +58,30 @@ var tcpForwardingLocal = testCase{
 					return
 				}
 				go func(conn net.Conn) {
-					httpConn, err := net.Dial("tcp", httpAddr)
+					httpConn, err := net.Dial("tcp", httpServer.Addr)
 					if err != nil {
 						conn.Close()
 						return
 					}
-					forwardConnections(conn, httpConn)
+					xnet.ForwardConnections(conn, httpConn)
 				}(conn)
 			}
 		}()
 
 		// 4. Test HTTP request through port forward
-		return testHTTPGet(fmt.Sprintf("http://127.0.0.1:%s/", localPort), "foo")
+		return xhttp.TestGet(fmt.Sprintf("http://127.0.0.1:%s/", localPort), "foo")
 	},
 }
 
 var tcpForwardingRemote = testCase{
 	name: "tcp-forwarding-remote",
-	server: &sshd.Config{
-		TCPForwarding: true,
-		LogVerbose:    true,
+	options: []sshtest.ServerOption{
+		sshtest.ServerWithNoAuth(),
+		sshtest.ServerWithTCPForwarding(true),
 	},
 	client: func(addr string) error {
 		// 1. Connect to SSH server
-		c, err := createSSHClient(addr)
+		c, err := sshtest.CreateSSHClient(addr)
 		if err != nil {
 			return fmt.Errorf("failed to connect to ssh: %w", err)
 		}
@@ -99,11 +100,10 @@ var tcpForwardingRemote = testCase{
 		remoteAddr := remoteListener.Addr().String()
 
 		// 3. Start our local HTTP server that will receive the forwarded connections
-		httpListener, httpServer, httpAddr, err := createTestHTTPServer("bar")
+		httpServer, err := xhttp.NewTestServer("bar")
 		if err != nil {
 			return err
 		}
-		defer httpListener.Close()
 		defer httpServer.Close()
 
 		// 4. Handle incoming connections from the remote port forwarding
@@ -117,7 +117,7 @@ var tcpForwardingRemote = testCase{
 			}
 
 			// Forward this connection to our local HTTP server
-			httpConn, err := net.Dial("tcp", httpAddr)
+			httpConn, err := net.Dial("tcp", httpServer.Addr)
 			if err != nil {
 				conn.Close()
 				connectionReceived <- fmt.Errorf("failed to connect to local http server: %w", err)
@@ -125,7 +125,7 @@ var tcpForwardingRemote = testCase{
 			}
 
 			connectionReceived <- nil
-			forwardConnections(conn, httpConn)
+			xnet.ForwardConnections(conn, httpConn)
 		}()
 
 		// 5. Make an HTTP request to the remote port
