@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jpillora/sshd-lite/sshd"
+	"github.com/jpillora/sshd-lite/sshd/xnet"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -51,18 +52,18 @@ func TestWindowsPowerShellCommand(t *testing.T) {
 		t.Fatalf("Failed to create SSH public key: %v", err)
 	}
 
-	c := &sshd.Config{
+	port, err := xnet.FindFreePort()
+	if err != nil {
+		t.Fatalf("Failed to get random port: %v", err)
+	}
+
+	c := sshd.Config{
 		Host:       "127.0.0.1",
+		Port:       port,
 		AuthKeys:   []ssh.PublicKey{sshPubKey},
 		KeySeed:    "test-key-seed-12345",
 		LogVerbose: true,
 	}
-
-	port, err := getRandomPort()
-	if err != nil {
-		t.Fatalf("Failed to get random port: %v", err)
-	}
-	c.Port = port
 
 	server, err := sshd.NewServer(c)
 	if err != nil {
