@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"fmt"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -52,10 +53,11 @@ func TestWindowsPowerShellCommand(t *testing.T) {
 		t.Fatalf("Failed to create SSH public key: %v", err)
 	}
 
-	port, err := xnet.FindFreePort()
+	portNum, err := xnet.FindFreePort()
 	if err != nil {
 		t.Fatalf("Failed to get random port: %v", err)
 	}
+	port := fmt.Sprintf("%d", portNum)
 
 	c := sshd.Config{
 		Host:       "127.0.0.1",
