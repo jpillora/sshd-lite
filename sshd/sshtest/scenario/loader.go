@@ -4,7 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"path/filepath"
+	"path"
 	"strings"
 )
 
@@ -27,15 +27,15 @@ func loadFixtureFile(name string) ([]byte, error) {
 	name = strings.TrimSuffix(name, ".yml")
 	name = strings.TrimSuffix(name, ".yaml")
 
-	// Try .yml
-	path := filepath.Join("fixtures", name+".yml")
+	// Try .yml - use forward slashes for embed.FS (not filepath.Join)
+	path := "fixtures/" + name + ".yml"
 	content, err := fixturesFS.ReadFile(path)
 	if err == nil {
 		return content, nil
 	}
 
 	// Try .yaml
-	path = filepath.Join("fixtures", name+".yaml")
+	path = "fixtures/" + name + ".yaml"
 	content, err = fixturesFS.ReadFile(path)
 	if err == nil {
 		return content, nil
@@ -47,16 +47,16 @@ func loadFixtureFile(name string) ([]byte, error) {
 // ListFixtures returns a list of available fixture names.
 func ListFixtures() ([]string, error) {
 	var names []string
-	err := fs.WalkDir(fixturesFS, "fixtures", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fixturesFS, "fixtures", func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			return nil
 		}
-		ext := filepath.Ext(path)
+		ext := path.Ext(fpath)
 		if ext == ".yml" || ext == ".yaml" {
-			name := strings.TrimPrefix(path, "fixtures/")
+			name := strings.TrimPrefix(fpath, "fixtures/")
 			name = strings.TrimSuffix(name, ext)
 			names = append(names, name)
 		}

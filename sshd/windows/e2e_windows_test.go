@@ -1,5 +1,4 @@
 //go:build windows
-//go:build windows
 
 package sshd_test
 
