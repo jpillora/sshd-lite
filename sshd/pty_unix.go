@@ -8,20 +8,11 @@ import (
 	"os/exec"
 
 	"github.com/creack/pty"
-	"golang.org/x/term"
 )
 
 func init() {
 	startPTY = func(cmd *exec.Cmd) (PTY, error) {
-		f, err := pty.Start(cmd)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := term.MakeRaw(int(f.Fd())); err != nil {
-			f.Close()
-			return nil, err
-		}
-		return f, nil
+		return pty.Start(cmd)
 	}
 }
 
