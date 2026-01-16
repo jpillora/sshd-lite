@@ -1,4 +1,4 @@
-package sshd
+package xssh
 
 import (
 	"encoding/binary"
@@ -14,6 +14,43 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// registerSessionHandlers registers the built-in session request handlers
+// when Session is enabled.
+func (c *xconn) registerSessionHandlers() {
+	if !c.config.Session {
+		return
+	}
+	// Resolve shell path if not already done
+	if c.config.Shell == "" || !isAbsPath(c.config.Shell) {
+		if path, err := ShellPath(c.config.Shell); err == nil {
+			c.config.Shell = path
+		}
+	}
+	c.sessionRequestHandlers["pty-req"] = handlePtyReq
+	c.sessionRequestHandlers["window-change"] = handleWindowChange
+	c.sessionRequestHandlers["env"] = handleEnv
+	c.sessionRequestHandlers["shell"] = handleShell
+	c.sessionRequestHandlers["exec"] = handleExec
+}
+
+// isAbsPath checks if the path is absolute (simple check for leading /)
+func isAbsPath(path string) bool {
+	return len(path) > 0 && (path[0] == '/' || (len(path) > 1 && path[1] == ':'))
+}
+
+// session logging helpers
+func debugf(sess *Session, f string, args ...interface{}) {
+	if sess.Logger != nil {
+		sess.Logger.Debug(fmt.Sprintf(f, args...))
+	}
+}
+
+func errorf(sess *Session, f string, args ...interface{}) {
+	if sess.Logger != nil {
+		sess.Logger.Error(fmt.Sprintf(f, args...))
+	}
+}
+
 // handlePtyReq handles "pty-req" session requests
 func handlePtyReq(sess *Session, req *Request) error {
 	if len(req.Payload) < 4 {
@@ -21,7 +58,7 @@ func handlePtyReq(sess *Session, req *Request) error {
 	}
 	termLen := req.Payload[3]
 	sess.Resizes <- req.Payload[termLen+4:]
-	sess.Debugf("PTY ready")
+	debugf(sess, "PTY ready")
 	return nil
 }
 
@@ -38,7 +75,7 @@ func handleEnv(sess *Session, req *Request) error {
 		return fmt.Errorf("failed to unmarshal env: %w", err)
 	}
 	kv := e.Name + "=" + e.Value
-	sess.Debugf("env: %s", kv)
+	debugf(sess, "env: %s", kv)
 	if !sess.Config().IgnoreEnv {
 		sess.Env = appendEnv(sess.Env, kv)
 	}
@@ -48,7 +85,7 @@ func handleEnv(sess *Session, req *Request) error {
 // handleShell handles "shell" session requests
 func handleShell(sess *Session, req *Request) error {
 	if len(req.Payload) > 0 {
-		sess.Debugf("shell command ignored '%s'", req.Payload)
+		debugf(sess, "shell command ignored '%s'", req.Payload)
 	}
 	return attachShell(sess)
 }
@@ -65,7 +102,7 @@ func handleExec(sess *Session, req *Request) error {
 		return fmt.Errorf("command length mismatch in payload")
 	}
 	command := string(req.Payload[4:])
-	sess.Debugf("exec command: %s", command)
+	debugf(sess, "exec command: %s", command)
 
 	// Execute the command
 	go executeCommand(sess, command)
@@ -82,32 +119,32 @@ func attachShell(sess *Session) error {
 	}
 	shell := exec.Command(cfg.Shell, args...)
 	setSysProcAttr(shell)
-	if cfg.WorkDir != "" {
-		shell.Dir = cfg.WorkDir
+	if cfg.WorkingDirectory != "" {
+		shell.Dir = cfg.WorkingDirectory
 	}
 	if !hasEnv(sess.Env, "TERM") {
 		sess.Env = append(sess.Env, "TERM=xterm-256color")
 	}
 	shell.Env = sess.Env
-	sess.Debugf("Session env: %v", sess.Env)
+	debugf(sess, "Session env: %v", sess.Env)
 
 	closeFunc := func() {
 		sess.Channel.Close()
 		if shell.Process != nil {
 			signalErr := shell.Process.Signal(os.Interrupt)
 			if signalErr != nil && !strings.Contains(signalErr.Error(), "process already finished") && !strings.Contains(signalErr.Error(), "already exited") && !strings.Contains(signalErr.Error(), "not supported") {
-				sess.Errorf("Failed to interrupt shell: %s", signalErr)
+				errorf(sess, "Failed to interrupt shell: %s", signalErr)
 			}
 			time.Sleep(100 * time.Millisecond)
 			killErr := shell.Process.Kill()
 			if killErr != nil && !strings.Contains(killErr.Error(), "process already finished") && !strings.Contains(killErr.Error(), "already exited") && !strings.Contains(killErr.Error(), "not supported") {
-				sess.Errorf("Failed to kill shell: %s", killErr)
+				errorf(sess, "Failed to kill shell: %s", killErr)
 			}
 			if _, waitErr := shell.Process.Wait(); waitErr != nil {
-				sess.Debugf("Process wait error: %s", waitErr)
+				debugf(sess, "Process wait error: %s", waitErr)
 			}
 		}
-		sess.Debugf("Session closed")
+		debugf(sess, "Session closed")
 	}
 
 	// start a shell for this channel's connection
@@ -130,19 +167,19 @@ func attachShell(sess *Session) error {
 	go func() {
 		_, err := io.Copy(sess.Channel, shellf)
 		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
-			sess.Debugf("Shell to connection copy error: %s", err)
+			debugf(sess, "Shell to connection copy error: %s", err)
 		}
 		once.Do(closeFunc)
 	}()
 	go func() {
 		_, err := io.Copy(shellf, sess.Channel)
 		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
-			sess.Debugf("Connection to shell copy error: %s", err)
+			debugf(sess, "Connection to shell copy error: %s", err)
 		}
 		once.Do(closeFunc)
 	}()
 
-	sess.Debugf("Shell attached")
+	debugf(sess, "Shell attached")
 
 	go func() {
 		// Start proactively listening for process death, for those ptys that
@@ -151,13 +188,13 @@ func attachShell(sess *Session) error {
 			_, err := shell.Process.Wait()
 			if err != nil {
 				if !strings.Contains(err.Error(), "wait: no child processes") && !strings.Contains(err.Error(), "exit status") && !strings.Contains(err.Error(), "Wait was already called") {
-					sess.Errorf("Shell process wait error: %s", err)
+					errorf(sess, "Shell process wait error: %s", err)
 				}
 			}
 			// Closing the pty is idempotent and ensures the copy goroutines exit
 			shellf.Close()
 		}
-		sess.Debugf("Shell terminated")
+		debugf(sess, "Shell terminated")
 		once.Do(closeFunc)
 	}()
 
@@ -172,8 +209,8 @@ func executeCommand(sess *Session, command string) {
 	// Use shell to execute the command
 	cmd := exec.Command(cfg.Shell, "-c", command)
 	setSysProcAttr(cmd)
-	if cfg.WorkDir != "" {
-		cmd.Dir = cfg.WorkDir
+	if cfg.WorkingDirectory != "" {
+		cmd.Dir = cfg.WorkingDirectory
 	}
 	cmd.Env = sess.Env
 	cmd.Stdin = sess.Channel
@@ -189,13 +226,13 @@ func executeCommand(sess *Session, command string) {
 	err := cmd.Run()
 	exitCode := uint32(0)
 	if err != nil {
-		sess.Debugf("Command execution failed: %s", err)
+		debugf(sess, "Command execution failed: %s", err)
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = uint32(exitErr.ExitCode())
 		}
 	}
-	sess.Debugf("Command execution completed")
+	debugf(sess, "Command execution completed")
 	if _, err := sess.Channel.SendRequest("exit-status", false, ssh.Marshal(&exit{Status: exitCode})); err != nil {
-		sess.Debugf("Failed to send exit-status: %s", err)
+		debugf(sess, "Failed to send exit-status: %s", err)
 	}
 }

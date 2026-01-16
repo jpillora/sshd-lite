@@ -4,35 +4,27 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/jpillora/sshd-lite/sshd/key"
+	"github.com/jpillora/sshd-lite/xssh"
 	"golang.org/x/crypto/ssh"
 )
 
 func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	sc := &ssh.ServerConfig{}
-	if s.config.Shell == "" {
-		if runtime.GOOS == "windows" {
-			s.config.Shell = "powershell"
-		} else {
-			s.config.Shell = "bash"
-		}
+	shellPath, err := xssh.ShellPath(s.config.Shell)
+	if err != nil {
+		return nil, err
 	}
+	s.config.Shell = shellPath
+	s.debugf("Session shell %s", s.config.Shell)
 	if s.config.WorkDir == "" {
 		if w, err := os.Getwd(); err == nil {
 			s.config.WorkDir = w
 		}
 	}
-	p, err := exec.LookPath(s.config.Shell)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find shell: %s", s.config.Shell)
-	}
-	s.config.Shell = p
-	s.debugf("Session shell %s", s.config.Shell)
 
 	var keyBytes []byte
 	if len(s.config.KeyBytes) > 0 {

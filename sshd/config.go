@@ -1,9 +1,10 @@
 package sshd
 
 import (
-	"errors"
+	"context"
 	"log/slog"
 
+	"github.com/jpillora/sshd-lite/xssh"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -24,80 +25,31 @@ type Config struct {
 	SFTP          bool   `opts:"short=s,help=enable the SFTP subsystem (disabled by default)"`
 	TCPForwarding bool   `opts:"name=tcp-forwarding,short=t,help=enable TCP forwarding (both local and reverse; disabled by default)"`
 	// programmatic options
-	KeyBytes               []byte                           `opts:"-"`
-	Logger                 *slog.Logger                     `opts:"-"`
-	AuthKeys               []ssh.PublicKey                  `opts:"-"`
-	GlobalRequestHandlers  map[string]GlobalRequestHandler  `opts:"-"`
-	ChannelHandlers        map[string]ChannelHandler        `opts:"-"`
-	SessionRequestHandlers map[string]SessionRequestHandler `opts:"-"`
-	SubsystemHandlers      map[string]SubsystemHandler      `opts:"-"`
+	KeyBytes  []byte           `opts:"-"`
+	Logger    *slog.Logger     `opts:"-"`
+	AuthKeys  []ssh.PublicKey  `opts:"-"`
+	// ConnectionHandler is called when a new SSH connection is established.
+	// The context is cancelled when the connection closes.
+	ConnectionHandler func(context.Context, *ssh.ServerConn) `opts:"-"`
+	GlobalRequestHandlers  map[string]xssh.GlobalRequestHandler   `opts:"-"`
+	ChannelHandlers        map[string]xssh.ChannelHandler         `opts:"-"`
+	SessionRequestHandlers map[string]xssh.SessionRequestHandler  `opts:"-"`
+	SubsystemHandlers      map[string]xssh.SubsystemHandler       `opts:"-"`
 }
 
-// Handler types for extensibility
+// Session is an alias for xssh.Session for backwards compatibility
+type Session = xssh.Session
 
-// GlobalRequestHandler handles global (connection-level) SSH requests.
-// Return an error to reject the request; return nil to accept.
-// Call req.Reply() to send a custom reply; otherwise auto-reply is sent.
-type GlobalRequestHandler func(conn ssh.Conn, req *Request) error
+// Request is an alias for xssh.Request for backwards compatibility
+type Request = xssh.Request
 
-// ChannelHandler handles new SSH channel requests.
-// Return an error to reject the channel; return nil to accept.
-type ChannelHandler func(ch ssh.NewChannel) error
-
-// SessionRequestHandler handles requests within an SSH session.
-// Return an error to reject the request; return nil to accept.
-// Call req.Reply() to send a custom reply; otherwise auto-reply is sent.
-type SessionRequestHandler func(sess *Session, req *Request) error
-
-// SubsystemHandler handles subsystem requests (e.g., sftp).
-// Return an error to reject the request; return nil to accept.
-type SubsystemHandler func(ch ssh.Channel, req *Request) error
-
-// Request wraps ssh.Request to track whether Reply was called.
-type Request struct {
-	*ssh.Request
-	replied bool
+// Wrap wraps an ssh.Request in an xssh.Request
+func Wrap(req *ssh.Request) *xssh.Request {
+	return xssh.WrapRequest(req)
 }
 
-// Wrap creates a wrapped request that tracks whether Reply was called.
-func Wrap(req *ssh.Request) *Request {
-	return &Request{Request: req}
-}
-
-// Reply sends a reply to the request and marks it as replied.
-func (r *Request) Reply(ok bool, payload []byte) error {
-	if r.replied {
-		return errors.New("request already replied to")
-	}
-	r.replied = true
-	return r.Request.Reply(ok, payload)
-}
-
-// Replied returns true if Reply has been called.
-func (r *Request) Replied() bool {
-	return r.replied
-}
-
-// Session represents an active SSH session with its associated state.
-type Session struct {
-	server *Server
-
-	Channel ssh.Channel
-	Env     []string
-	Resizes chan []byte
-}
-
-// Debugf logs a debug message for this session.
-func (s *Session) Debugf(f string, args ...interface{}) {
-	s.server.debugf(f, args...)
-}
-
-// Errorf logs an error message for this session.
-func (s *Session) Errorf(f string, args ...interface{}) {
-	s.server.errorf(f, args...)
-}
-
-// Config returns the server configuration.
-func (s *Session) Config() Config {
-	return s.server.config
-}
+// Handler type aliases for backwards compatibility
+type GlobalRequestHandler = xssh.GlobalRequestHandler
+type ChannelHandler = xssh.ChannelHandler
+type SessionRequestHandler = xssh.SessionRequestHandler
+type SubsystemHandler = xssh.SubsystemHandler

@@ -1,4 +1,4 @@
-package sshd
+package xssh
 
 import (
 	"encoding/binary"
@@ -28,5 +28,3 @@ func parseDims(b []byte) (uint32, uint32) {
 	h := binary.BigEndian.Uint32(b[4:])
 	return w, h
 }
-
-// Borrowed from https://github.com/creack/termios/blob/master/win/win.go

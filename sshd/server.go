@@ -8,17 +8,17 @@ import (
 	"os"
 
 	"github.com/jpillora/jplog"
+	"github.com/jpillora/sshd-lite/xssh"
 	"golang.org/x/crypto/ssh"
 )
 
 // Server is a simple SSH Daemon
 type Server struct {
-	config                 Config
-	sshConfig              *ssh.ServerConfig
-	globalRequestHandlers  map[string]GlobalRequestHandler
-	channelHandlers        map[string]ChannelHandler
-	sessionRequestHandlers map[string]SessionRequestHandler
-	subsystemHandlers      map[string]SubsystemHandler
+	config    Config
+	sshConfig *ssh.ServerConfig
+
+	// xssh configuration built from sshd config
+	xsshConfig *xssh.Config
 }
 
 // NewServer creates a new Server
@@ -37,58 +37,68 @@ func NewServer(c Config) (*Server, error) {
 		return nil, err
 	}
 	s.sshConfig = sc
-	// initialize handler maps
-	s.globalRequestHandlers = map[string]GlobalRequestHandler{}
-	s.channelHandlers = map[string]ChannelHandler{}
-	s.sessionRequestHandlers = map[string]SessionRequestHandler{}
-	s.subsystemHandlers = map[string]SubsystemHandler{}
-	// register built-in session handlers
-	s.sessionRequestHandlers["pty-req"] = handlePtyReq
-	s.sessionRequestHandlers["window-change"] = handleWindowChange
-	s.sessionRequestHandlers["env"] = handleEnv
-	s.sessionRequestHandlers["shell"] = handleShell
-	s.sessionRequestHandlers["exec"] = handleExec
-	// register built-in channel handler
-	s.channelHandlers["session"] = s.handleSessionChannel
-	// register TCP forwarding handlers if enabled
+
+	// Build xssh config
+	xc := &xssh.Config{
+		Logger:                 c.Logger,
+		KeepAlive:              c.KeepAlive,
+		IgnoreEnv:              c.IgnoreEnv,
+		WorkingDirectory:       c.WorkDir,
+		Shell:                  c.Shell,
+		Session:                true,
+		SFTP:                   c.SFTP,
+		LocalForwarding:        c.TCPForwarding,
+		RemoteForwarding:       c.TCPForwarding,
+		GlobalRequestHandlers:  make(map[string]xssh.GlobalRequestHandler),
+		ChannelHandlers:        make(map[string]xssh.ChannelHandler),
+		SessionRequestHandlers: make(map[string]xssh.SessionRequestHandler),
+		SubsystemHandlers:      make(map[string]xssh.SubsystemHandler),
+	}
+
+	// Register built-in channel handler for sessions
+	xc.ChannelHandlers["session"] = func(conn xssh.Conn, ch ssh.NewChannel) error {
+		return conn.HandleSessionChannel(ch)
+	}
+
 	if c.TCPForwarding {
-		tfh := NewTCPForwardingHandler(s)
-		s.globalRequestHandlers["tcpip-forward"] = tfh.handleTCPIPForward
-		s.globalRequestHandlers["cancel-tcpip-forward"] = tfh.handleCancelTCPIPForward
-		s.channelHandlers["direct-tcpip"] = tfh.HandleDirectTCPIP
 		s.infof("TCP forwarding enabled")
 	}
-	// register SFTP subsystem if enabled
 	if c.SFTP {
-		s.subsystemHandlers["sftp"] = NewSFTPHandler(s)
 		s.infof("SFTP enabled")
 	}
-	// merge custom handlers from config (fail on clash with built-in)
+	// Merge custom handlers from config (fail on clash with built-in)
 	for name, h := range c.GlobalRequestHandlers {
-		if _, exists := s.globalRequestHandlers[name]; exists {
+		if _, exists := xc.GlobalRequestHandlers[name]; exists {
 			return nil, fmt.Errorf("global request handler %q already registered", name)
 		}
-		s.globalRequestHandlers[name] = h
+		xc.GlobalRequestHandlers[name] = h
 	}
 	for name, h := range c.ChannelHandlers {
-		if _, exists := s.channelHandlers[name]; exists {
+		if _, exists := xc.ChannelHandlers[name]; exists {
 			return nil, fmt.Errorf("channel handler %q already registered", name)
 		}
-		s.channelHandlers[name] = h
+		xc.ChannelHandlers[name] = h
 	}
 	for name, h := range c.SessionRequestHandlers {
-		if _, exists := s.sessionRequestHandlers[name]; exists {
+		if _, exists := xc.SessionRequestHandlers[name]; exists {
 			return nil, fmt.Errorf("session request handler %q already registered", name)
 		}
-		s.sessionRequestHandlers[name] = h
+		xc.SessionRequestHandlers[name] = h
 	}
 	for name, h := range c.SubsystemHandlers {
-		if _, exists := s.subsystemHandlers[name]; exists {
+		if _, exists := xc.SubsystemHandlers[name]; exists {
 			return nil, fmt.Errorf("subsystem handler %q already registered", name)
 		}
-		s.subsystemHandlers[name] = h
+		xc.SubsystemHandlers[name] = h
 	}
+
+	s.xsshConfig = xc
 	return s, nil
+}
+
+// Config returns the server configuration.
+func (s *Server) Config() Config {
+	return s.config
 }
 
 // Start listening on port

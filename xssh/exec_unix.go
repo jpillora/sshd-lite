@@ -1,7 +1,7 @@
 //go:build !windows
 // +build !windows
 
-package sshd
+package xssh
 
 import (
 	"os/exec"

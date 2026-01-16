@@ -1,7 +1,7 @@
 //go:build !windows
 // +build !windows
 
-package sshd
+package xssh
 
 import (
 	"os"
@@ -22,9 +22,6 @@ func SetWinsize(t FdHolder, w, h uint32) {
 	// Type assert to *os.File since that's what creack/pty expects
 	if f, ok := t.(*os.File); ok {
 		// PTY resize errors are non-fatal - terminal continues with previous size
-		resizeErr := pty.Setsize(f, ws)
-		if resizeErr != nil {
-			// Error is intentionally ignored - PTY resize failures are non-fatal
-		}
+		_ = pty.Setsize(f, ws)
 	}
 }

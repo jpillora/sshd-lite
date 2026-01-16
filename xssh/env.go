@@ -1,4 +1,4 @@
-package sshd
+package xssh
 
 import "strings"
 
