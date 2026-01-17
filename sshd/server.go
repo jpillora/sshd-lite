@@ -154,12 +154,7 @@ func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
 	for {
 		tcpConn, err := l.Accept()
 		if err != nil {
-			// Check if the error is due to listener being closed
-			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
-				return nil // Expected error when stopping
-			}
-			s.errorf("Failed to accept incoming connection (%s)", err)
-			continue
+			return fmt.Errorf("accept failed: %w", err)
 		}
 		go s.HandleConn(tcpConn)
 	}
