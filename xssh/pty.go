@@ -18,9 +18,16 @@ type FdHolder interface {
 	Fd() uintptr
 }
 
+// Winsize describes the terminal size.
+type Winsize struct {
+	Rows uint16
+	Cols uint16
+}
+
 // startPTY starts a command with a PTY attached.
+// If ws is non-nil, the PTY is opened at that size atomically.
 // Platform-specific implementations are in pty_unix.go and pty_win.go.
-var startPTY func(*exec.Cmd) (PTY, error)
+var startPTY func(cmd *exec.Cmd, ws *Winsize) (PTY, error)
 
 // parseDims extracts terminal dimensions (width x height) from the provided buffer.
 func parseDims(b []byte) (uint32, uint32) {

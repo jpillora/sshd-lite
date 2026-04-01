@@ -10,8 +10,10 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 
 	"golang.org/x/crypto/ssh"
@@ -42,11 +44,7 @@ func GenerateKey(seed string, ec bool) ([]byte, error) {
 		}
 		return pem.EncodeToMemory(pemBlock), nil
 	}
-	priv, err := rsa.GenerateKey(r, 2048)
-	if err != nil {
-		return nil, err
-	}
-	err = priv.Validate()
+	priv, err := generateRSAKey(r, 2048)
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +115,82 @@ func AuthorizedKeyEntry(seed string) (string, error) {
 		return "", err
 	}
 	return string(ssh.MarshalAuthorizedKey(pubKey)), nil
+}
+
+var bigOne = big.NewInt(1)
+
+// generateRSAKey generates an RSA key using the provided reader for randomness.
+// Unlike rsa.GenerateKey, this uses the reader directly (Go 1.26+ ignores
+// custom readers passed to rsa.GenerateKey).
+func generateRSAKey(random io.Reader, bits int) (*rsa.PrivateKey, error) {
+	e := 65537
+	for {
+		p, err := randPrime(random, bits/2)
+		if err != nil {
+			return nil, err
+		}
+		q, err := randPrime(random, bits/2)
+		if err != nil {
+			return nil, err
+		}
+		if p.Cmp(q) == 0 {
+			continue
+		}
+		n := new(big.Int).Mul(p, q)
+		if n.BitLen() != bits {
+			continue
+		}
+		pminus1 := new(big.Int).Sub(p, bigOne)
+		qminus1 := new(big.Int).Sub(q, bigOne)
+		totient := new(big.Int).Mul(pminus1, qminus1)
+		d := new(big.Int).ModInverse(big.NewInt(int64(e)), totient)
+		if d == nil {
+			continue
+		}
+		priv := &rsa.PrivateKey{
+			PublicKey: rsa.PublicKey{N: n, E: e},
+			D:         d,
+			Primes:    []*big.Int{p, q},
+		}
+		priv.Precompute()
+		if err := priv.Validate(); err != nil {
+			return nil, err
+		}
+		return priv, nil
+	}
+}
+
+// randPrime generates a random prime of the given bit length using the provided
+// reader. This reimplements crypto/rand.Prime to use the reader directly.
+func randPrime(r io.Reader, bits int) (*big.Int, error) {
+	if bits < 2 {
+		return nil, errors.New("prime size must be at least 2-bit")
+	}
+	b := uint(bits % 8)
+	if b == 0 {
+		b = 8
+	}
+	buf := make([]byte, (bits+7)/8)
+	p := new(big.Int)
+	for {
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, err
+		}
+		buf[0] &= uint8(int(1<<b) - 1)
+		if b >= 2 {
+			buf[0] |= 3 << (b - 2)
+		} else {
+			buf[0] |= 1
+			if len(buf) > 1 {
+				buf[1] |= 0x80
+			}
+		}
+		buf[len(buf)-1] |= 1
+		p.SetBytes(buf)
+		if p.ProbablyPrime(20) {
+			return p, nil
+		}
+	}
 }
 
 const DetermRandIter = 2048

@@ -1,6 +1,6 @@
 module github.com/jpillora/sshd-lite/winpty
 
-go 1.25
+go 1.26.1
 
 // Use photostorm's fork for Windows PTY support
 replace github.com/creack/pty => github.com/photostorm/pty v1.1.19-0.20230903182454-31354506054b

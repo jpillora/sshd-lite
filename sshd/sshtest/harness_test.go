@@ -391,6 +391,40 @@ func TestShellSession(t *testing.T) {
 	}
 }
 
+func TestInitialPTYSize(t *testing.T) {
+	const wantCols = 120
+	const wantRows = 40
+
+	env := sshtest.New(t).
+		WithServer().
+		WithClient("test", sshtest.ClientWithKeySeed("test"), sshtest.ClientWithPTY(wantCols, wantRows)).
+		Start()
+	defer env.Stop()
+
+	client := env.Client("test")
+	if err := client.Connect(); err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	sess, err := client.Shell()
+	if err != nil {
+		t.Fatalf("failed to start shell: %v", err)
+	}
+	defer sess.Close()
+
+	// Query terminal dimensions via tput (reads TIOCGWINSZ ioctl)
+	_, err = sess.Write([]byte("printf '%s %s\\n' $(tput cols) $(tput lines)\r"))
+	if err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	// Verify the shell sees the correct initial size
+	expected := "120 40"
+	if err := sess.WaitForOutput(expected, 5*time.Second); err != nil {
+		t.Fatalf("initial PTY size not correct: %v", err)
+	}
+}
+
 func TestActions(t *testing.T) {
 	// Test action string representations
 	tests := []struct {

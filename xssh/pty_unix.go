@@ -4,6 +4,7 @@
 package xssh
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 
@@ -11,17 +12,21 @@ import (
 )
 
 func init() {
-	startPTY = func(cmd *exec.Cmd) (PTY, error) {
-		return pty.Start(cmd)
+	startPTY = func(cmd *exec.Cmd, ws *Winsize) (PTY, error) {
+		var pws *pty.Winsize
+		if ws != nil {
+			pws = &pty.Winsize{Rows: ws.Rows, Cols: ws.Cols}
+		}
+		return pty.StartWithSize(cmd, pws)
 	}
 }
 
 // SetWinsize sets the size of the given pty.
-func SetWinsize(t FdHolder, w, h uint32) {
-	ws := &pty.Winsize{Rows: uint16(h), Cols: uint16(w)}
-	// Type assert to *os.File since that's what creack/pty expects
-	if f, ok := t.(*os.File); ok {
-		// PTY resize errors are non-fatal - terminal continues with previous size
-		_ = pty.Setsize(f, ws)
+func SetWinsize(t FdHolder, w, h uint32) error {
+	f, ok := t.(*os.File)
+	if !ok {
+		return fmt.Errorf("SetWinsize: expected *os.File, got %T", t)
 	}
+	ws := &pty.Winsize{Rows: uint16(h), Cols: uint16(w)}
+	return pty.Setsize(f, ws)
 }

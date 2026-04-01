@@ -1,6 +1,6 @@
 module github.com/jpillora/sshd-lite
 
-go 1.25.0
+go 1.26.1
 
 tool github.com/jpillora/md-tmpl
 

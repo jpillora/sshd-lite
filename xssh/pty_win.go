@@ -10,14 +10,20 @@ import (
 )
 
 func init() {
-	startPTY = func(cmd *exec.Cmd) (PTY, error) {
-		// winpty.Start returns pty.Pty which implements PTY interface
-		return winpty.Start(cmd)
+	startPTY = func(cmd *exec.Cmd, ws *Winsize) (PTY, error) {
+		p, err := winpty.Start(cmd)
+		if err != nil {
+			return nil, err
+		}
+		if ws != nil {
+			_ = winpty.Setsize(p, &winpty.Winsize{Rows: ws.Rows, Cols: ws.Cols})
+		}
+		return p, nil
 	}
 }
 
 // SetWinsize sets the size of the given pty.
-func SetWinsize(t FdHolder, w, h uint32) {
+func SetWinsize(t FdHolder, w, h uint32) error {
 	ws := &winpty.Winsize{Rows: uint16(h), Cols: uint16(w)}
-	winpty.Setsize(t, ws)
+	return winpty.Setsize(t, ws)
 }

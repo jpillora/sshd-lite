@@ -56,8 +56,11 @@ func handlePtyReq(sess *Session, req *Request) error {
 	if len(req.Payload) < 4 {
 		return fmt.Errorf("malformed pty-req payload")
 	}
-	termLen := req.Payload[3]
-	sess.Resizes <- req.Payload[termLen+4:]
+	termLen := binary.BigEndian.Uint32(req.Payload[0:4])
+	if uint32(len(req.Payload)) < 4+termLen {
+		return fmt.Errorf("pty-req payload truncated: termLen=%d payloadLen=%d", termLen, len(req.Payload))
+	}
+	sess.Resizes <- req.Payload[4+termLen:]
 	debugf(sess, "PTY ready")
 	return nil
 }
@@ -147,8 +150,20 @@ func attachShell(sess *Session) error {
 		debugf(sess, "Session closed")
 	}
 
+	// drain initial PTY size from pty-req handler (avoids race where
+	// shell starts at OS default 80x24 before the resize goroutine fires)
+	var initialSize *Winsize
+	select {
+	case payload := <-sess.Resizes:
+		if len(payload) >= 8 {
+			w, h := parseDims(payload)
+			initialSize = &Winsize{Cols: uint16(w), Rows: uint16(h)}
+		}
+	default:
+	}
+
 	// start a shell for this channel's connection
-	shellf, err := startPTY(shell)
+	shellf, err := startPTY(shell, initialSize)
 	if err != nil {
 		closeFunc()
 		return fmt.Errorf("could not start pty: %w", err)
@@ -158,7 +173,9 @@ func attachShell(sess *Session) error {
 	go func() {
 		for payload := range sess.Resizes {
 			w, h := parseDims(payload)
-			SetWinsize(shellf, w, h)
+			if err := SetWinsize(shellf, w, h); err != nil {
+				errorf(sess, "SetWinsize failed: %s", err)
+			}
 		}
 	}()
 

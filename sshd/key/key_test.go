@@ -27,6 +27,8 @@ func TestGenerateKey(t *testing.T) {
 		t.Fatal("keys should be different when using random seed")
 	}
 
+	// Seeded RSA: same seed produces same key (compare public keys since
+	// PEM encoding may include non-deterministic elements)
 	k3, err := key.GenerateKey("seed1", false)
 	if err != nil {
 		t.Fatalf("failed to generate key with seed: %v", err)
@@ -36,7 +38,9 @@ func TestGenerateKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to generate key with same seed: %v", err)
 	}
-	if string(k3) != string(k4) {
+	pub3 := mustPublicKey(t, k3)
+	pub4 := mustPublicKey(t, k4)
+	if string(pub3.Marshal()) != string(pub4.Marshal()) {
 		t.Fatal("keys with same seed should be identical")
 	}
 
@@ -44,9 +48,49 @@ func TestGenerateKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to generate key with different seed: %v", err)
 	}
-	if string(k3) == string(k5) {
+	pub5 := mustPublicKey(t, k5)
+	if string(pub3.Marshal()) == string(pub5.Marshal()) {
 		t.Fatal("keys with different seeds should be different")
 	}
+}
+
+func TestGenerateKeyEd25519Deterministic(t *testing.T) {
+	t.Parallel()
+
+	// Ed25519 seeded generation produces deterministic keys
+	// (PEM encoding includes random check bytes, so compare parsed public keys)
+	k3, err := key.GenerateKey("seed1", true)
+	if err != nil {
+		t.Fatalf("failed to generate key with seed: %v", err)
+	}
+
+	k4, err := key.GenerateKey("seed1", true)
+	if err != nil {
+		t.Fatalf("failed to generate key with same seed: %v", err)
+	}
+	pub3 := mustPublicKey(t, k3)
+	pub4 := mustPublicKey(t, k4)
+	if string(pub3.Marshal()) != string(pub4.Marshal()) {
+		t.Fatal("keys with same seed should be identical")
+	}
+
+	k5, err := key.GenerateKey("seed2", true)
+	if err != nil {
+		t.Fatalf("failed to generate key with different seed: %v", err)
+	}
+	pub5 := mustPublicKey(t, k5)
+	if string(pub3.Marshal()) == string(pub5.Marshal()) {
+		t.Fatal("keys with different seeds should be different")
+	}
+}
+
+func mustPublicKey(t *testing.T, pemBytes []byte) ssh.PublicKey {
+	t.Helper()
+	signer, err := ssh.ParsePrivateKey(pemBytes)
+	if err != nil {
+		t.Fatalf("failed to parse private key: %v", err)
+	}
+	return signer.PublicKey()
 }
 
 func TestGenerateKeyEd25519(t *testing.T) {
