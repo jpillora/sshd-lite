@@ -64,17 +64,20 @@ func startSFTPServer(sess *Session, cfg SFTPConfig) {
 		}()
 		opts = append(opts, sftp.WithDebug(pw))
 	}
+	exitStatus := uint32(0)
+	defer func() {
+		sess.Channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{exitStatus}))
+	}()
 	sftpServer, err := sftp.NewServer(sess.Channel, opts...)
 	if err != nil {
 		debug("Failed to create SFTP server", "error", err)
+		exitStatus = 1
 		return
 	}
-	exitStatus := uint32(0)
 	if err := sftpServer.Serve(); err != nil && err != io.EOF {
 		debug("SFTP server error", "error", err)
 		exitStatus = 1
 	} else {
 		debug("SFTP server exited normally")
 	}
-	sess.Channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{exitStatus}))
 }
