@@ -2,6 +2,7 @@ package sshtest_test
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -392,6 +393,9 @@ func TestShellSession(t *testing.T) {
 }
 
 func TestInitialPTYSize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tput not available on Windows")
+	}
 	const wantCols = 120
 	const wantRows = 40
 

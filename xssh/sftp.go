@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 // SFTPConfig configures the SFTP subsystem handler.
@@ -68,9 +69,12 @@ func startSFTPServer(sess *Session, cfg SFTPConfig) {
 		debug("Failed to create SFTP server", "error", err)
 		return
 	}
+	exitStatus := uint32(0)
 	if err := sftpServer.Serve(); err != nil && err != io.EOF {
 		debug("SFTP server error", "error", err)
+		exitStatus = 1
 	} else {
 		debug("SFTP server exited normally")
 	}
+	sess.Channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{exitStatus}))
 }
