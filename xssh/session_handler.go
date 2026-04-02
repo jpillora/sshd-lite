@@ -230,9 +230,18 @@ func executeCommand(sess *Session, command string) {
 		cmd.Dir = cfg.WorkingDirectory
 	}
 	cmd.Env = sess.Env
-	cmd.Stdin = sess.Channel
 	cmd.Stdout = sess.Channel
 	cmd.Stderr = sess.Channel
+	// Use StdinPipe so cmd.Wait doesn't block waiting for sess.Channel to EOF.
+	// Wait auto-closes the pipe when the process exits, unblocking our copy goroutine.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		debugf(sess, "Failed to create stdin pipe: %s", err)
+		return
+	}
+	go func() {
+		io.Copy(stdin, sess.Channel)
+	}()
 
 	// capture exit status
 	type exit struct {
@@ -240,7 +249,7 @@ func executeCommand(sess *Session, command string) {
 	}
 
 	// Run the command
-	err := cmd.Run()
+	err = cmd.Run()
 	exitCode := uint32(0)
 	if err != nil {
 		debugf(sess, "Command execution failed: %s", err)

@@ -429,6 +429,104 @@ func TestInitialPTYSize(t *testing.T) {
 	}
 }
 
+func TestExecDoesNotHang(t *testing.T) {
+	env := sshtest.New(t).
+		WithServer().
+		WithClient("test", sshtest.ClientWithKeySeed("test")).
+		Start()
+	defer env.Stop()
+
+	client := env.Client("test")
+	if err := client.Connect(); err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		result, err := client.Exec("date")
+		if err != nil {
+			t.Errorf("exec error: %v", err)
+			return
+		}
+		if result.ExitCode != 0 {
+			t.Errorf("expected exit 0, got %d", result.ExitCode)
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("exec 'date' hung — channel not closed after command exited")
+	}
+}
+
+func TestExecExitCodes(t *testing.T) {
+	env := sshtest.New(t).
+		WithServer().
+		WithClient("test", sshtest.ClientWithKeySeed("test")).
+		Start()
+	defer env.Stop()
+
+	client := env.Client("test")
+	if err := client.Connect(); err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		cmd      string
+		wantCode int
+		wantOut  string
+	}{
+		{"exit 0", "echo ok", 0, "ok"},
+		{"exit 1", "false", 1, ""},
+		{"exit 42", "exit 42", 42, ""},
+		{"output with nonzero", "echo fail; exit 2", 2, "fail"},
+		{"stderr", "echo err >&2; exit 3", 3, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := client.Exec(tc.cmd)
+			if err != nil && result == nil {
+				t.Fatalf("exec error: %v", err)
+			}
+			if result.ExitCode != tc.wantCode {
+				t.Errorf("exit code: got %d, want %d", result.ExitCode, tc.wantCode)
+			}
+			if tc.wantOut != "" && !strings.Contains(result.Stdout, tc.wantOut) {
+				t.Errorf("stdout %q missing %q", result.Stdout, tc.wantOut)
+			}
+		})
+	}
+}
+
+func TestExecCombinedOutput(t *testing.T) {
+	env := sshtest.New(t).
+		WithServer().
+		WithClient("test", sshtest.ClientWithKeySeed("test")).
+		Start()
+	defer env.Stop()
+
+	client := env.Client("test")
+	if err := client.Connect(); err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	result, err := client.Exec("echo out; echo err >&2")
+	if err != nil {
+		t.Fatalf("exec error: %v", err)
+	}
+	combined := result.Stdout + result.Stderr
+	if !strings.Contains(combined, "out") {
+		t.Errorf("output %q missing 'out'", combined)
+	}
+	if !strings.Contains(combined, "err") {
+		t.Errorf("output %q missing 'err'", combined)
+	}
+}
+
 func TestActions(t *testing.T) {
 	// Test action string representations
 	tests := []struct {
