@@ -9,8 +9,8 @@ require (
 	github.com/jpillora/jplog v1.0.2
 	github.com/jpillora/sshd-lite/winpty v0.0.0-20260106042502-3a28ff230268
 	github.com/pkg/sftp v1.13.10
-	golang.org/x/crypto v0.48.0
-	google.golang.org/grpc v1.79.2
+	golang.org/x/crypto v0.49.0
+	google.golang.org/grpc v1.80.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -20,9 +20,9 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/jpillora/opts v1.3.2
+	github.com/jpillora/opts v1.5.0
 	github.com/kr/fs v0.1.0 // indirect
-	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
+	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/posener/complete v1.2.3 // indirect
