@@ -7,4 +7,4 @@ replace github.com/creack/pty => github.com/photostorm/pty v1.1.19-0.20230903182
 
 require github.com/creack/pty v1.1.24
 
-require golang.org/x/sys v0.39.0 // indirect
+require golang.org/x/sys v0.44.0 // indirect
