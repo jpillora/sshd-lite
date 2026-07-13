@@ -208,8 +208,10 @@ func attachShell(sess *Session) error {
 					errorf(sess, "Shell process wait error: %s", err)
 				}
 			}
-			// Closing the pty is idempotent and ensures the copy goroutines exit
-			shellf.Close()
+			// Release the pty so the io.Copy goroutines unblock. On Windows the
+			// pty library closes the ConPTY itself; closing it again here would
+			// double-free the pseudoconsole handle and corrupt the heap.
+			closeShellPTY(shellf)
 		}
 		debugf(sess, "Shell terminated")
 		once.Do(closeFunc)

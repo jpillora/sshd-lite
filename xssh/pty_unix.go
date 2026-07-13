@@ -30,3 +30,10 @@ func SetWinsize(t FdHolder, w, h uint32) error {
 	ws := &pty.Winsize{Rows: uint16(h), Cols: uint16(w)}
 	return pty.Setsize(f, ws)
 }
+
+// closeShellPTY releases the shell PTY after the process has exited. On unix the
+// PTY is owned by this package (creack/pty does not close it automatically), so
+// we close it here to unblock the io.Copy goroutines.
+func closeShellPTY(p PTY) {
+	_ = p.Close()
+}

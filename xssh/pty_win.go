@@ -27,3 +27,13 @@ func SetWinsize(t FdHolder, w, h uint32) error {
 	ws := &winpty.Winsize{Rows: uint16(h), Cols: uint16(w)}
 	return winpty.Setsize(t, ws)
 }
+
+// closeShellPTY releases the shell PTY after the process has exited. On Windows
+// the ConPTY is owned and closed by photostorm/pty's internal waitProcess
+// goroutine (run_windows.go). Closing it again here would call ClosePseudoConsole
+// on an already-freed handle and corrupt the process heap (STATUS_HEAP_CORRUPTION),
+// so this is intentionally a no-op — the library unblocks the io.Copy goroutines
+// when it closes the ConPTY's pipe ends.
+func closeShellPTY(p PTY) {
+	// no-op: the pty library closes the ConPTY itself
+}
