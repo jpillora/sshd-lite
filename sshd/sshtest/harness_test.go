@@ -473,6 +473,13 @@ func TestExecExitCodes(t *testing.T) {
 		t.Fatalf("failed to connect: %v", err)
 	}
 
+	// PowerShell has no POSIX `>&2` redirection (it errors and exits 1 before
+	// reaching `exit 3`), so write to stderr via .NET on Windows.
+	stderrCmd := "echo err >&2; exit 3"
+	if runtime.GOOS == "windows" {
+		stderrCmd = "[Console]::Error.WriteLine('err'); exit 3"
+	}
+
 	tests := []struct {
 		name     string
 		cmd      string
@@ -483,7 +490,7 @@ func TestExecExitCodes(t *testing.T) {
 		{"exit 1", "false", 1, ""},
 		{"exit 42", "exit 42", 42, ""},
 		{"output with nonzero", "echo fail; exit 2", 2, "fail"},
-		{"stderr", "echo err >&2; exit 3", 3, ""},
+		{"stderr", stderrCmd, 3, ""},
 	}
 
 	for _, tc := range tests {
