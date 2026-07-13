@@ -17,8 +17,8 @@ github.com/jpillora/md-tmpl v1.3.0 h1:M9XrHfGD0Jue5arhejVUj4HE74PXuaR1/KC0FJ9olW
 github.com/jpillora/md-tmpl v1.3.0/go.mod h1:7kH6OzBwoCAbrXV0OiXKAYLdXwVCMAEirNxZ5uUl5pA=
 github.com/jpillora/opts v1.5.1 h1:y0Q5HLe1i8pxFNe88f6LS1wR2u8QhakzFrBk48m3NPQ=
 github.com/jpillora/opts v1.5.1/go.mod h1:7HijPKTuFya3UtQJlGr8jQZ19F7WFYEDeuSW8wjkARE=
-github.com/jpillora/sshd-lite/winpty v0.0.0-20260106042502-3a28ff230268 h1:nLadiDRHBzGF7SqrrUyd5U+xZ4yW/7ODq4/KVdtjQz4=
-github.com/jpillora/sshd-lite/winpty v0.0.0-20260106042502-3a28ff230268/go.mod h1:y2fM+oBFTJ2ZDDLKYgLs5yc/rG3cxBTAvIh+QgifgEU=
+github.com/jpillora/sshd-lite/winpty v0.0.0-20260713004405-0d8a9beff9be h1:lMBvOOcF+J1q52baBChOumWpbM1aIMQ2AlUCi7rXxx0=
+github.com/jpillora/sshd-lite/winpty v0.0.0-20260713004405-0d8a9beff9be/go.mod h1:dX2vocha94gR13mrxqqgAz6L3u908FbFRh1r7ArD9Vc=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=
 github.com/kr/fs v0.1.0/go.mod h1:FFnZGqtBN9Gxj7eW1uZ42v5BccTP0vu6NEaFoC2HwRg=
 github.com/lucasb-eyer/go-colorful v1.4.0 h1:UtrWVfLdarDgc44HcS7pYloGHJUjHV/4FwW4TvVgFr4=

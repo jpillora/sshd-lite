@@ -1,13 +1,13 @@
 module github.com/jpillora/sshd-lite
 
-go 1.26.1
+go 1.26.5
 
 tool github.com/jpillora/md-tmpl
 
 require (
 	github.com/creack/pty v1.1.24
 	github.com/jpillora/jplog v1.0.2
-	github.com/jpillora/sshd-lite/winpty v0.0.0-20260106042502-3a28ff230268
+	github.com/jpillora/sshd-lite/winpty v0.0.0-20260713004405-0d8a9beff9be
 	github.com/pkg/sftp v1.13.11
 	golang.org/x/crypto v0.54.0
 	google.golang.org/grpc v1.82.0
