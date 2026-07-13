@@ -45,6 +45,10 @@ jobs:
         env:
           GITHUB_USER: ${{ github.repository_owner }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # goreleaser:latest ships an older Go; allow it to fetch the toolchain
+          # required by the go directive (>=1.26.5) so release binaries carry the
+          # stdlib security fixes instead of failing with GOTOOLCHAIN=local.
+          GOTOOLCHAIN: auto
         with:
           args: release --config .github/goreleaser.yml
   # ================
