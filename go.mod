@@ -10,7 +10,7 @@ require (
 	github.com/jpillora/sshd-lite/winpty v0.0.0-20260713004405-0d8a9beff9be
 	github.com/pkg/sftp v1.13.11
 	golang.org/x/crypto v0.54.0
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -23,7 +23,7 @@ require (
 	github.com/jpillora/opts v1.5.1
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
-	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mattn/go-isatty v0.0.23 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/posener/complete v1.2.3 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
