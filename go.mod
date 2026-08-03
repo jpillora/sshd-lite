@@ -10,7 +10,7 @@ require (
 	github.com/jpillora/sshd-lite/winpty v0.0.0-20260713004405-0d8a9beff9be
 	github.com/pkg/sftp v1.13.11
 	golang.org/x/crypto v0.54.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.83.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
