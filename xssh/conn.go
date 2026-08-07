@@ -52,9 +52,12 @@ func NewConn(sshConn ssh.Conn, channels <-chan ssh.NewChannel, requests <-chan *
 	if config == nil {
 		config = &Config{}
 	}
+	// Take our own copy: callers share one Config across every connection, and
+	// per-connection defaulting below (shell path resolution) writes to it.
+	cfg := *config
 	xc := &xconn{
 		inner:    sshConn,
-		config:   config,
+		config:   &cfg,
 		channels: channels,
 		requests: requests,
 	}

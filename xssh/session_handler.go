@@ -20,8 +20,9 @@ func (c *xconn) registerSessionHandlers() {
 	if !c.config.Session {
 		return
 	}
-	// Resolve shell path if not already done
-	if c.config.Shell == "" || !isAbsPath(c.config.Shell) {
+	// Resolve shell path if the caller didn't. Safe to write: c.config is this
+	// connection's own copy, not the one shared across connections.
+	if !filepath.IsAbs(c.config.Shell) {
 		if path, err := ShellPath(c.config.Shell); err == nil {
 			c.config.Shell = path
 		}
@@ -31,11 +32,6 @@ func (c *xconn) registerSessionHandlers() {
 	c.sessionRequestHandlers["env"] = handleEnv
 	c.sessionRequestHandlers["shell"] = handleShell
 	c.sessionRequestHandlers["exec"] = handleExec
-}
-
-// isAbsPath checks if the path is absolute (simple check for leading /)
-func isAbsPath(path string) bool {
-	return len(path) > 0 && (path[0] == '/' || (len(path) > 1 && path[1] == ':'))
 }
 
 // session logging helpers
@@ -242,7 +238,14 @@ func executeCommand(sess *Session, command string) {
 		return
 	}
 	go func() {
-		io.Copy(stdin, sess.Channel)
+		_, err := io.Copy(stdin, sess.Channel)
+		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "broken pipe") {
+			debugf(sess, "Connection to stdin copy error: %s", err)
+		}
+		// Propagate the client's EOF. Wait only closes the pipe once the process
+		// exits, so commands that read until stdin EOF (cat, wc, sort) would
+		// otherwise block forever and deadlock cmd.Run.
+		stdin.Close()
 	}()
 
 	// capture exit status

@@ -3,6 +3,7 @@ package sshd_test
 import (
 	"fmt"
 	"net"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,56 @@ func TestAll(t *testing.T) {
 				t.Log("Test case passed")
 			}
 		})
+	}
+}
+
+// TestExecStdin checks that a command reading from stdin sees EOF once the
+// client half-closes the channel. "cat" never exits otherwise, so a regression
+// here shows up as a hang rather than a wrong result.
+func TestExecStdin(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("cat not available on Windows")
+	}
+	server, err := sshtest.NewServer(sshtest.ServerWithNoAuth())
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+	if err := server.Start(t.Context()); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop()
+
+	c, err := sshtest.CreateSSHClient(server.Addr())
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer c.Close()
+	s, err := c.NewSession()
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	s.Stdin = strings.NewReader("helloworld\n")
+
+	type result struct {
+		out []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := s.Output("cat")
+		done <- result{out, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Failed to run command: %v", r.err)
+		}
+		if got := strings.ReplaceAll(string(r.out), "\r\n", "\n"); got != "helloworld\n" {
+			t.Fatalf("Unexpected output: %q", r.out)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timed out waiting for command to exit, stdin was never closed")
 	}
 }
 

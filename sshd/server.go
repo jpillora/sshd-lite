@@ -44,7 +44,7 @@ func NewServer(c Config) (*Server, error) {
 		KeepAlive:              c.KeepAlive,
 		IgnoreEnv:              c.IgnoreEnv,
 		WorkingDirectory:       c.WorkDir,
-		Shell:                  c.Shell,
+		Shell:                  s.config.Shell, // absolute path, resolved once by computeSSHConfig
 		Session:                true,
 		SFTP:                   c.SFTP,
 		LocalForwarding:        c.TCPForwarding,
