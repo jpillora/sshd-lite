@@ -34,10 +34,11 @@ type Conn interface {
 }
 
 type xconn struct {
-	inner    ssh.Conn
-	config   *Config
-	channels <-chan ssh.NewChannel
-	requests <-chan *ssh.Request
+	inner                ssh.Conn
+	config               *Config
+	channels             <-chan ssh.NewChannel
+	requests             <-chan *ssh.Request
+	tcpForwardingHandler *TCPForwardingHandler
 	// Handler maps (initialized from config, can be modified)
 	globalRequestHandlers  map[string]GlobalRequestHandler
 	channelHandlers        map[string]ChannelHandler
@@ -79,6 +80,7 @@ func NewConn(sshConn ssh.Conn, channels <-chan ssh.NewChannel, requests <-chan *
 	}
 	if config.LocalForwarding || config.RemoteForwarding {
 		tfh := NewTCPForwardingHandler()
+		xc.tcpForwardingHandler = tfh
 		if config.LocalForwarding {
 			xc.channelHandlers["direct-tcpip"] = tfh.HandleDirectTCPIP
 		}
@@ -163,6 +165,14 @@ func (c *xconn) Wait() error {
 // This method blocks until the connection is closed.
 // Call this in a goroutine if you need to do other work.
 func (c *xconn) Serve() {
+	if c.tcpForwardingHandler != nil {
+		defer func() {
+			if err := c.tcpForwardingHandler.closeAll(); err != nil {
+				c.errorf("Failed to clean up TCP forwarding: %s", err)
+			}
+		}()
+	}
+
 	// Handle global requests
 	go c.handleGlobalRequests()
 

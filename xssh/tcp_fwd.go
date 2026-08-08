@@ -1,6 +1,7 @@
 package xssh
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,14 +13,28 @@ import (
 // TCPForwardingHandler manages TCP forwarding functionality.
 // It can be used with any xssh.Conn to enable TCP forwarding.
 type TCPForwardingHandler struct {
-	listeners   map[string]net.Listener
-	listenersMu sync.RWMutex
+	mu          sync.Mutex
+	listeners   map[string]*tcpForwardListener
+	connections map[*reverseTCPConnection]struct{}
+	closed      bool
+}
+
+type tcpForwardListener struct {
+	listener net.Listener
+	bindAddr string
+	host     string
+	port     uint32
+}
+
+type reverseTCPConnection struct {
+	conn net.Conn
 }
 
 // NewTCPForwardingHandler creates a new TCP forwarding handler.
 func NewTCPForwardingHandler() *TCPForwardingHandler {
 	return &TCPForwardingHandler{
-		listeners: make(map[string]net.Listener),
+		listeners:   make(map[string]*tcpForwardListener),
+		connections: make(map[*reverseTCPConnection]struct{}),
 	}
 }
 
@@ -44,30 +59,36 @@ func (h *TCPForwardingHandler) HandleTCPIPForward(conn Conn, req *Request) error
 		return fmt.Errorf("failed to listen on %s: %w", bindAddr, err)
 	}
 
-	// Store the listener
-	h.listenersMu.Lock()
-	h.listeners[bindAddr] = listener
-	h.listenersMu.Unlock()
-
 	// Get the actual port if 0 was requested
 	actualPort := uint32(listener.Addr().(*net.TCPAddr).Port)
+	actualBindAddr := net.JoinHostPort(payload.Host, fmt.Sprintf("%d", actualPort))
+	forwardListener := &tcpForwardListener{
+		listener: listener,
+		bindAddr: actualBindAddr,
+		host:     payload.Host,
+		port:     actualPort,
+	}
+	if err := h.registerListener(forwardListener); err != nil {
+		return err
+	}
 
 	// Reply with the actual port (handler is responsible for reply on success)
 	if req.WantReply {
-		if err := req.Reply(true, []byte{
-			byte(actualPort >> 24),
-			byte(actualPort >> 16),
-			byte(actualPort >> 8),
-			byte(actualPort >> 0),
-		}); err != nil {
-			conn.errorf("Failed to reply to TCP forwarding request: %s", err)
+		var replyPayload []byte
+		if payload.Port == 0 {
+			replyPayload = ssh.Marshal(&struct{ Port uint32 }{Port: actualPort})
+		}
+		if err := req.Reply(true, replyPayload); err != nil {
+			h.removeListener(actualBindAddr, forwardListener)
+			closeErr := closeListener(listener)
+			return errors.Join(fmt.Errorf("failed to reply to TCP forwarding request: %w", err), closeErr)
 		}
 	}
 
-	conn.debugf("Reverse forwarding established on %s (actual port: %d)", bindAddr, actualPort)
+	conn.debugf("Reverse forwarding established on %s", actualBindAddr)
 
 	// Start accepting connections
-	go h.acceptReverseConnections(listener, conn, payload.Host, actualPort)
+	go h.acceptReverseConnections(forwardListener, conn)
 	return nil
 }
 
@@ -86,24 +107,21 @@ func (h *TCPForwardingHandler) HandleCancelTCPIPForward(conn Conn, req *Request)
 	bindAddr := net.JoinHostPort(payload.Host, fmt.Sprintf("%d", payload.Port))
 	conn.debugf("Cancel reverse forwarding request for %s", bindAddr)
 
-	h.listenersMu.Lock()
-	listener, exists := h.listeners[bindAddr]
-	if exists {
-		delete(h.listeners, bindAddr)
-	}
-	h.listenersMu.Unlock()
+	listener, exists := h.takeListener(bindAddr)
 
 	if !exists {
 		return fmt.Errorf("no reverse forwarding found for %s", bindAddr)
 	}
 
-	listener.Close()
+	if err := closeListener(listener.listener); err != nil {
+		return fmt.Errorf("failed to close reverse forwarding listener for %s: %w", bindAddr, err)
+	}
 	conn.debugf("Cancelled reverse forwarding for %s", bindAddr)
 
 	// Reply success (handler is responsible for reply on success)
 	if req.WantReply {
 		if err := req.Reply(true, nil); err != nil {
-			conn.errorf("Failed to reply to TCP forwarding cancel request: %s", err)
+			return fmt.Errorf("failed to reply to TCP forwarding cancel request: %w", err)
 		}
 	}
 	return nil
@@ -160,25 +178,46 @@ func (h *TCPForwardingHandler) HandleDirectTCPIP(conn Conn, newChannel ssh.NewCh
 	return nil
 }
 
-// acceptReverseConnections accepts incoming connections for reverse forwarding
-func (h *TCPForwardingHandler) acceptReverseConnections(listener net.Listener, conn Conn, host string, port uint32) {
-	defer listener.Close()
+// acceptReverseConnections accepts incoming connections for reverse forwarding.
+func (h *TCPForwardingHandler) acceptReverseConnections(forwardListener *tcpForwardListener, conn Conn) {
+	listener := forwardListener.listener
+	defer func() {
+		h.removeListener(forwardListener.bindAddr, forwardListener)
+		if err := closeListener(listener); err != nil {
+			conn.errorf("Failed to close reverse forwarding listener for %s: %s", forwardListener.bindAddr, err)
+		}
+	}()
 
 	for {
 		tcpConn, err := listener.Accept()
 		if err != nil {
-			conn.debugf("Failed to accept connection for reverse forwarding: %v", err)
+			if !errors.Is(err, net.ErrClosed) {
+				conn.errorf("Failed to accept connection for reverse forwarding on %s: %v", forwardListener.bindAddr, err)
+			}
 			return
 		}
 
+		trackedConn, ok := h.trackConnection(tcpConn)
+		if !ok {
+			if err := tcpConn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				conn.errorf("Failed to close reverse forwarding connection during shutdown: %s", err)
+			}
+			return
+		}
 		conn.debugf("Accepted reverse forwarding connection from %s", tcpConn.RemoteAddr())
-		go h.handleReverseConnection(tcpConn, conn, host, port)
+		go h.handleReverseConnection(trackedConn, conn, forwardListener.host, forwardListener.port)
 	}
 }
 
 // handleReverseConnection handles a single reverse forwarding connection
-func (h *TCPForwardingHandler) handleReverseConnection(tcpConn net.Conn, conn Conn, host string, port uint32) {
-	defer tcpConn.Close()
+func (h *TCPForwardingHandler) handleReverseConnection(trackedConn *reverseTCPConnection, conn Conn, host string, port uint32) {
+	tcpConn := trackedConn.conn
+	defer func() {
+		h.untrackConnection(trackedConn)
+		if err := tcpConn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			conn.debugf("Failed to close reverse forwarding connection: %s", err)
+		}
+	}()
 
 	// Open a channel to the SSH client
 	remoteAddr := tcpConn.RemoteAddr().(*net.TCPAddr)
@@ -210,15 +249,91 @@ func (h *TCPForwardingHandler) handleReverseConnection(tcpConn net.Conn, conn Co
 	pipeConnections(conn, tcpConn, channel)
 }
 
-// Close closes all active listeners
+// Close closes all reverse-forward listeners and accepted TCP connections.
 func (h *TCPForwardingHandler) Close() {
-	h.listenersMu.Lock()
-	defer h.listenersMu.Unlock()
+	_ = h.closeAll()
+}
 
-	for _, listener := range h.listeners {
-		listener.Close()
+func (h *TCPForwardingHandler) registerListener(listener *tcpForwardListener) error {
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return errors.Join(errors.New("tcp forwarding handler is closed"), closeListener(listener.listener))
 	}
-	h.listeners = make(map[string]net.Listener)
+	if _, exists := h.listeners[listener.bindAddr]; exists {
+		h.mu.Unlock()
+		return errors.Join(fmt.Errorf("reverse forwarding already exists for %s", listener.bindAddr), closeListener(listener.listener))
+	}
+	h.listeners[listener.bindAddr] = listener
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *TCPForwardingHandler) takeListener(bindAddr string) (*tcpForwardListener, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	listener, exists := h.listeners[bindAddr]
+	if exists {
+		delete(h.listeners, bindAddr)
+	}
+	return listener, exists
+}
+
+// removeListener deletes only the supplied registration. This prevents a late
+// accept-loop exit from deleting a newer listener registered for the same key.
+func (h *TCPForwardingHandler) removeListener(bindAddr string, listener *tcpForwardListener) {
+	h.mu.Lock()
+	if h.listeners[bindAddr] == listener {
+		delete(h.listeners, bindAddr)
+	}
+	h.mu.Unlock()
+}
+
+func (h *TCPForwardingHandler) trackConnection(conn net.Conn) (*reverseTCPConnection, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return nil, false
+	}
+	trackedConn := &reverseTCPConnection{conn: conn}
+	h.connections[trackedConn] = struct{}{}
+	return trackedConn, true
+}
+
+func (h *TCPForwardingHandler) untrackConnection(conn *reverseTCPConnection) {
+	h.mu.Lock()
+	delete(h.connections, conn)
+	h.mu.Unlock()
+}
+
+func (h *TCPForwardingHandler) closeAll() error {
+	h.mu.Lock()
+	h.closed = true
+	listeners := h.listeners
+	connections := h.connections
+	h.listeners = make(map[string]*tcpForwardListener)
+	h.connections = make(map[*reverseTCPConnection]struct{})
+	h.mu.Unlock()
+
+	var errs []error
+	for _, listener := range listeners {
+		if err := closeListener(listener.listener); err != nil {
+			errs = append(errs, fmt.Errorf("close reverse forwarding listener %s: %w", listener.bindAddr, err))
+		}
+	}
+	for conn := range connections {
+		if err := conn.conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, fmt.Errorf("close reverse forwarding connection: %w", err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func closeListener(listener net.Listener) error {
+	if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		return err
+	}
+	return nil
 }
 
 // pipeConnections pipes data between two connections
