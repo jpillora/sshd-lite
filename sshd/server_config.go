@@ -2,6 +2,8 @@ package sshd
 
 import (
 	"bytes"
+	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +18,8 @@ import (
 // maxAuthorizedKeysFileSize bounds per-authentication read and parse work while
 // leaving room for thousands of ordinary authorized_keys entries.
 const maxAuthorizedKeysFileSize = 1 << 20
+
+var errAuthenticationDenied = errors.New("denied")
 
 func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	sc := &ssh.ServerConfig{}
@@ -87,12 +91,12 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 		u := pair[0]
 		p := pair[1]
 		sc.PasswordCallback = func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			if conn.User() == u && string(pass) == p {
-				s.debugf("User '%s' authenticated with password", u)
+			if conn.User() == u && subtle.ConstantTimeCompare(pass, []byte(p)) == 1 {
+				s.debugf("User '%s' authenticated with password", conn.User())
 				return nil, nil
 			}
-			s.debugf("Authentication failed '%s:%s'", conn.User(), pass)
-			return nil, fmt.Errorf("denied")
+			s.debugf("Password authentication failed for user '%s'", conn.User())
+			return nil, errAuthenticationDenied
 		}
 		s.infof("Authentication enabled (user '%s')", u)
 	} else if s.config.AuthType != "" {

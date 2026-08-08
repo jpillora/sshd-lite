@@ -76,6 +76,76 @@ func TestFileAuthInitialLoadFailsClosed(t *testing.T) {
 	}
 }
 
+func TestPasswordAuthenticationLogsDoNotExposeCredentials(t *testing.T) {
+	const (
+		username           = "password-log-user"
+		configuredPassword = "SERVER-PASSWORD-SENTINEL-6fe4d48c"
+		attemptedPassword  = "ATTEMPTED-PASSWORD-SENTINEL-98d2a731"
+	)
+
+	tests := []struct {
+		name         string
+		password     string
+		wantSuccess  bool
+		wantLogEntry string
+	}{
+		{
+			name:         "success",
+			password:     configuredPassword,
+			wantSuccess:  true,
+			wantLogEntry: "User '" + username + "' authenticated with password",
+		},
+		{
+			name:         "failure",
+			password:     attemptedPassword,
+			wantLogEntry: "Password authentication failed for user '" + username + "'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			server, err := NewServer(Config{
+				AuthType:   username + ":" + configuredPassword,
+				KeySeed:    "password-log-test",
+				KeySeedEC:  true,
+				LogVerbose: true,
+				Logger:     logger,
+			})
+			if err != nil {
+				t.Fatalf("NewServer failed: %v", err)
+			}
+
+			clientErr := runPasswordSSHHandshake(t, server, username, tt.password)
+			if tt.wantSuccess && clientErr != nil {
+				t.Fatalf("password authentication failed: %v", clientErr)
+			}
+			if !tt.wantSuccess && clientErr == nil {
+				t.Fatal("password authentication unexpectedly succeeded")
+			}
+
+			output := logs.String()
+			for _, secret := range []string{
+				configuredPassword,
+				attemptedPassword,
+				username + ":" + configuredPassword,
+				username + ":" + attemptedPassword,
+			} {
+				if strings.Contains(output, secret) {
+					t.Fatalf("authentication logs exposed secret %q:\n%s", secret, output)
+				}
+			}
+			if !strings.Contains(output, tt.wantLogEntry) {
+				t.Fatalf("authentication logs lack useful username context %q:\n%s", tt.wantLogEntry, output)
+			}
+			if !tt.wantSuccess && !strings.Contains(output, "Failed to handshake") {
+				t.Fatalf("failed handshake was not logged generically:\n%s", output)
+			}
+		})
+	}
+}
+
 func TestFileAuthReloadFailsClosedAndRecovers(t *testing.T) {
 	keyA := publicKeyFromSeed(t, "file-auth-a")
 	keyB := publicKeyFromSeed(t, "file-auth-b")
@@ -320,6 +390,37 @@ func requireFileAuth(t *testing.T, callback func(ssh.ConnMetadata, ssh.PublicKey
 	if got := err.Error(); got != "denied" {
 		t.Fatalf("authentication exposed reload details to client: %q", got)
 	}
+}
+
+func runPasswordSSHHandshake(t *testing.T, server *Server, username, password string) error {
+	t.Helper()
+	serverConn, clientConn := tcpConnPair(t)
+	if err := clientConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set password handshake deadline: %v", err)
+	}
+
+	serverDone := make(chan struct{})
+	go func() {
+		server.HandleConn(serverConn)
+		close(serverDone)
+	}()
+
+	clientSSHConn, _, _, clientErr := ssh.NewClientConn(clientConn, "password-log-test", &ssh.ClientConfig{
+		User:            username,
+		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	})
+	if clientSSHConn != nil {
+		clientSSHConn.Close()
+	}
+	clientConn.Close()
+
+	select {
+	case <-serverDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for password SSH handshake")
+	}
+	return clientErr
 }
 
 type sshHandshakeResult struct {
