@@ -1,13 +1,103 @@
 package xssh
 
 import (
+	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
+
+func TestCommandWaitDelayBoundsInheritedOutput(t *testing.T) {
+	const modeEnv = "SSHD_LITE_WAIT_DELAY_HELPER"
+	const pidFileEnv = "SSHD_LITE_WAIT_DELAY_PID_FILE"
+	switch os.Getenv(modeEnv) {
+	case "parent":
+		child := exec.Command(os.Args[0], "-test.run=^TestCommandWaitDelayBoundsInheritedOutput$")
+		child.Env = append(os.Environ(), modeEnv+"=child")
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			t.Fatalf("start output-holding child: %v", err)
+		}
+		if err := os.WriteFile(os.Getenv(pidFileEnv), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+			_ = child.Process.Kill()
+			t.Fatalf("write child pid: %v", err)
+		}
+		return
+	case "child":
+		time.Sleep(30 * time.Second)
+		return
+	}
+
+	pidFile := fmt.Sprintf("%s/child.pid", t.TempDir())
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCommandWaitDelayBoundsInheritedOutput$")
+	cmd.Env = append(os.Environ(), modeEnv+"=parent", pidFileEnv+"="+pidFile)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	prepareCommand(cmd)
+	if cmd.WaitDelay <= 0 {
+		t.Fatal("remote command has no bounded I/O wait")
+	}
+	// Keep the regression fast while exercising the same configured mechanism.
+	cmd.WaitDelay = 100 * time.Millisecond
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper parent: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+
+	var childPID int
+	deadline := time.Now().Add(5 * time.Second)
+	for childPID == 0 {
+		data, err := os.ReadFile(pidFile)
+		if err == nil {
+			childPID, err = strconv.Atoi(string(data))
+			if err != nil {
+				t.Fatalf("parse child pid: %v", err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("read child pid: %v", err)
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatalf("timed out waiting for helper pid; output: %s", output.String())
+		}
+		if childPID == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			if process, err := os.FindProcess(childPID); err == nil {
+				_ = process.Kill()
+			}
+		})
+	}
+	t.Cleanup(cleanup)
+
+	started := time.Now()
+	err := cmd.Wait()
+	if !errors.Is(err, exec.ErrWaitDelay) {
+		cleanup()
+		t.Fatalf("Wait error = %v, want exec.ErrWaitDelay; output: %s", err, output.String())
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		cleanup()
+		t.Fatalf("WaitDelay did not bound inherited output pipe: %s", elapsed)
+	}
+	cleanup()
+}
 
 func TestHandlePtyReqValidation(t *testing.T) {
 	valid := marshalPtyRequest(80, 24, []byte{ssh.ECHO, 0, 0, 0, 1, 0})

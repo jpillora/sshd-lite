@@ -251,6 +251,7 @@ func (c *xconn) HandleSessionChannel(newChannel ssh.NewChannel) error {
 	// create session and handle requests
 	sess := &Session{
 		conn:    c,
+		done:    make(chan struct{}),
 		Channel: channel,
 		Env:     os.Environ(),
 		// Resize events use latest-value semantics. A capacity of one lets the
@@ -264,6 +265,7 @@ func (c *xconn) HandleSessionChannel(newChannel ssh.NewChannel) error {
 
 // handleSessionRequests dispatches session requests to registered handlers
 func (c *xconn) handleSessionRequests(sess *Session, requests <-chan *ssh.Request) {
+	defer sess.closeDone()
 	defer close(sess.Resizes)
 
 	// start keep alive loop

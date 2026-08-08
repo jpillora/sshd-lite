@@ -97,6 +97,13 @@ func ServerWithShell(shell string) ServerOption {
 	}
 }
 
+// ServerWithWorkDir sets the initial working directory for sessions.
+func ServerWithWorkDir(workDir string) ServerOption {
+	return func(c *serverConfig) {
+		c.WorkDir = workDir
+	}
+}
+
 // ServerWithKeySeed sets the seed for deterministic host key generation.
 func ServerWithKeySeed(seed string) ServerOption {
 	return func(c *serverConfig) {

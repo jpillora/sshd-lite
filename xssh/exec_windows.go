@@ -16,3 +16,7 @@ func setSysProcAttr(cmd *exec.Cmd) {
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}
 }
+
+func setCommandProcessGroup(cmd *exec.Cmd) {
+	setSysProcAttr(cmd)
+}

@@ -2,6 +2,7 @@ package xssh
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -353,47 +354,98 @@ func executeCommand(sess *Session, command string) {
 
 	// Use shell to execute the command
 	cmd := exec.Command(cfg.Shell, "-c", command)
-	setSysProcAttr(cmd)
+	prepareCommand(cmd)
 	if cfg.WorkingDirectory != "" {
 		cmd.Dir = cfg.WorkingDirectory
 	}
 	cmd.Env = sess.Env
 	cmd.Stdout = sess.Channel
-	cmd.Stderr = sess.Channel
+	cmd.Stderr = sess.Channel.Stderr()
 	// Use StdinPipe so cmd.Wait doesn't block waiting for sess.Channel to EOF.
 	// Wait auto-closes the pipe when the process exits, unblocking our copy goroutine.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		debugf(sess, "Failed to create stdin pipe: %s", err)
+		commandSetupFailed(sess, "failed to create command stdin", err)
 		return
 	}
-	go func() {
-		_, err := io.Copy(stdin, sess.Channel)
-		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "broken pipe") {
-			debugf(sess, "Connection to stdin copy error: %s", err)
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		action := "failed to start command"
+		if cmd.Dir != "" {
+			action = fmt.Sprintf("failed to start command in %q", cmd.Dir)
 		}
-		// Propagate the client's EOF. Wait only closes the pipe once the process
-		// exits, so commands that read until stdin EOF (cat, wc, sort) would
-		// otherwise block forever and deadlock cmd.Run.
-		stdin.Close()
-	}()
+		commandSetupFailed(sess, action, err)
+		return
+	}
 
-	// capture exit status
+	go copyCommandStdin(sess, stdin)
+
+	err, lifecycleErr := waitCommand(cmd, sess.Done())
+	if lifecycleErr != nil && !processAlreadyDone(lifecycleErr) {
+		debugf(sess, "Failed to observe or terminate command: %s", lifecycleErr)
+	}
+
+	exitCode := commandExitCode(err)
+	if err != nil {
+		debugf(sess, "Command execution failed: %s", err)
+	}
+	debugf(sess, "Command execution completed")
+	sendExitStatus(sess, exitCode)
+}
+
+const commandWaitDelay = 2 * time.Second
+
+func prepareCommand(cmd *exec.Cmd) {
+	setCommandProcessGroup(cmd)
+	// os/exec uses internal pipes when stdout/stderr are non-files (including an
+	// SSH channel). If descendants inherit those handles after the command
+	// leader exits, WaitDelay closes the pipes instead of letting Wait hang.
+	cmd.WaitDelay = commandWaitDelay
+}
+
+func copyCommandStdin(sess *Session, stdin io.WriteCloser) {
+	_, err := io.Copy(stdin, sess.Channel)
+	if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "broken pipe") {
+		debugf(sess, "Connection to stdin copy error: %s", err)
+	}
+	// EOF on SSH stdin is deliberately not session cancellation. Closing only
+	// the command's stdin preserves commands such as cat, wc, and sort.
+	if err := stdin.Close(); err != nil && !processAlreadyDone(err) && !strings.Contains(err.Error(), "broken pipe") {
+		debugf(sess, "Failed to close command stdin: %s", err)
+	}
+}
+
+func commandSetupFailed(sess *Session, action string, err error) {
+	message := fmt.Sprintf("sshd-lite: %s: %v\n", action, err)
+	if _, writeErr := io.WriteString(sess.Channel.Stderr(), message); writeErr != nil {
+		debugf(sess, "Failed to report command setup error: %s", writeErr)
+	}
+	debugf(sess, "%s: %s", action, err)
+	sendExitStatus(sess, 1)
+}
+
+func commandExitCode(err error) uint32 {
+	if err == nil {
+		return 0
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return uint32(exitErr.ExitCode())
+	}
+	return 1
+}
+
+func sendExitStatus(sess *Session, status uint32) {
 	type exit struct {
 		Status uint32
 	}
-
-	// Run the command
-	err = cmd.Run()
-	exitCode := uint32(0)
-	if err != nil {
-		debugf(sess, "Command execution failed: %s", err)
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = uint32(exitErr.ExitCode())
-		}
-	}
-	debugf(sess, "Command execution completed")
-	if _, err := sess.Channel.SendRequest("exit-status", false, ssh.Marshal(&exit{Status: exitCode})); err != nil {
+	if _, err := sess.Channel.SendRequest("exit-status", false, ssh.Marshal(&exit{Status: status})); err != nil {
 		debugf(sess, "Failed to send exit-status: %s", err)
 	}
+}
+
+func processAlreadyDone(err error) bool {
+	return err == nil ||
+		errors.Is(err, os.ErrProcessDone) ||
+		strings.Contains(err.Error(), "process already finished") ||
+		strings.Contains(err.Error(), "already exited")
 }

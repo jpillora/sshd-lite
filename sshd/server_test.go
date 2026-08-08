@@ -1,9 +1,11 @@
 package sshd_test
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -100,6 +102,113 @@ func TestExecStdin(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Timed out waiting for command to exit, stdin was never closed")
 	}
+}
+
+func TestExecSeparatesStdoutAndStderr(t *testing.T) {
+	t.Parallel()
+	client := startExecTestServer(t)
+
+	session, err := client.NewSession()
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	defer session.Close()
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+	command := "printf 'stdout-only'; printf 'stderr-only' >&2"
+	if runtime.GOOS == "windows" {
+		command = "[Console]::Out.Write('stdout-only'); [Console]::Error.Write('stderr-only')"
+	}
+	if err := session.Run(command); err != nil {
+		t.Fatalf("run command: %v", err)
+	}
+	if got := stdout.String(); got != "stdout-only" {
+		t.Fatalf("stdout = %q, want %q", got, "stdout-only")
+	}
+	if got := stderr.String(); got != "stderr-only" {
+		t.Fatalf("stderr = %q, want %q", got, "stderr-only")
+	}
+}
+
+func TestExecSetupFailureReportsStderrAndNonzeroStatus(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	server, err := sshtest.NewServer(
+		sshtest.ServerWithNoAuth(),
+		sshtest.ServerWithWorkDir(missing),
+	)
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	if err := server.Start(t.Context()); err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	defer server.Stop()
+
+	client, err := sshtest.CreateSSHClient(server.Addr())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+	session, err := client.NewSession()
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	defer session.Close()
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+	err = session.Run("echo unreachable")
+	exitErr, ok := err.(*ssh.ExitError)
+	if !ok {
+		t.Fatalf("run error = %T %v, want *ssh.ExitError", err, err)
+	}
+	if exitErr.ExitStatus() == 0 {
+		t.Fatal("setup failure returned exit status 0")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("setup failure wrote stdout: %q", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "failed to start command") || !strings.Contains(got, missing) {
+		t.Fatalf("setup failure stderr = %q, want action and working directory", got)
+	}
+}
+
+func TestExecPreservesExitStatus(t *testing.T) {
+	t.Parallel()
+	client := startExecTestServer(t)
+	session, err := client.NewSession()
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	defer session.Close()
+	err = session.Run("exit 37")
+	exitErr, ok := err.(*ssh.ExitError)
+	if !ok {
+		t.Fatalf("run error = %T %v, want *ssh.ExitError", err, err)
+	}
+	if got := exitErr.ExitStatus(); got != 37 {
+		t.Fatalf("exit status = %d, want 37", got)
+	}
+}
+
+func startExecTestServer(t *testing.T) *ssh.Client {
+	t.Helper()
+	server, err := sshtest.NewServer(sshtest.ServerWithNoAuth())
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	if err := server.Start(t.Context()); err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	t.Cleanup(func() { _ = server.Stop() })
+	client, err := sshtest.CreateSSHClient(server.Addr())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client
 }
 
 // TestMalformedResizeAfterShellKeepsConnectionUsable exercises the wire-level
