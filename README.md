@@ -3,7 +3,7 @@
 [![GoDoc](https://img.shields.io/static/v1?label=godoc&message=reference&color=00add8)](https://pkg.go.dev/github.com/jpillora/sshd-lite)
 [![CI](https://github.com/jpillora/sshd-lite/workflows/CI/badge.svg)](https://github.com/jpillora/sshd-lite/actions?workflow=CI)
 
-A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). A slightly more practical version of the SSH daemon described in this blog post http://blog.gopheracademy.com/go-and-ssh/.
+A feature-light Secure Shell Daemon `sshd(8)` written in Go (Golang). A slightly more practical version of the SSH daemon described in [this Gopher Academy post](https://blog.gopheracademy.com/go-and-ssh/).
 
 ### Install
 
@@ -26,8 +26,9 @@ go install github.com/jpillora/sshd-lite@latest
 ### Features
 
 * Cross platform binaries with no dependencies
-* Remote shells (`bash` in linux/mac and `powershell` in windows)
-* Authentication (`user:pass`, `~/.ssh/authorized_keys`, `github.com/foobar`, or `none`)
+* Interactive shells (`bash` on Linux/macOS and `powershell` on Windows)
+* Remote command execution with stdin, separate stdout/stderr, and exit status
+* Authentication (`user:pass`, an unrestricted `authorized_keys` file, `github.com/foobar`, or `none`)
 * Seed server-key generation
 * Enable SFTP support with `--sftp` (allows `scp` and other SFTP clients)
 * Enable TCP forwarding with `--tcp-forwarding` (both local and reverse forwarding)
@@ -74,9 +75,9 @@ $ sshd-lite --help
 
   <auth> must be set to one of:
   1. a username and password string separated by a colon ("myuser:mypass")
-  2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys"); if any
-     entry has authorized_keys options, the entire file is rejected
-  3. an authorized github user ("github.com/myuser") public keys from .keys
+  2. a path to an ssh authorized_keys file ("~/.ssh/authorized_keys"); entries
+     must be unrestricted, and any entry with options makes the file invalid
+  3. a GitHub user ("github.com/myuser"); public keys are fetched from .keys
   4. "none" to disable client authentication :WARNING: very insecure
 
   Options:
@@ -102,14 +103,17 @@ $ sshd-lite --help
   --help                        display help
 
   Notes:
-  * if no keyfile and no keyseed are set, a random RSA2048 key is used
-  * authorized_keys files are automatically reloaded; if any entry has options,
-    the entire file is rejected, not partially accepted
-  * once authenticated, clients will have access to a shell of the
-    current user. sshd-lite does not lookup system users.
-  * sshd-lite only supports remotes shells, sftp, and tcp forwarding. command
-    execution are not currently supported.
-  * sftp working directory is the home directory of the user
+  * if no keyfile and no keyseed are set, a random 2048-bit RSA key is used
+  * authorized_keys files are validated at startup and reloaded for every public
+    key authentication; a failed reload denies authentication until the file is
+    valid again, and any entry with options makes the entire file invalid
+  * authenticated names do not select system users or change privileges; shells
+    and commands run as the user that started sshd-lite
+  * remote commands stream stdin, stdout, and stderr and report their exit status
+  * shells, commands, and SFTP start in workdir; if unset, it is the process
+    working directory when the server is created
+  * handshake-timeout and max-pending-handshakes use safe defaults when zero;
+    set either to a negative value to disable that protection
 
   Version:
     X.Y.Z
@@ -122,7 +126,47 @@ $ sshd-lite --help
 
 ### Programmatic Usage
 
-[![GoDoc](https://godoc.org/github.com/jpillora/sshd-lite/server?status.svg)](https://godoc.org/github.com/jpillora/sshd-lite/server)
+Use the [`sshd` package](https://pkg.go.dev/github.com/jpillora/sshd-lite/sshd) to configure and run a server. Cancelling the context stops the listener, closes active SSH connections, and waits for connection-owned protocol handlers to finish.
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+	"os/signal"
+	"syscall"
+
+	"github.com/jpillora/sshd-lite/sshd"
+)
+
+func main() {
+	server, err := sshd.NewServer(sshd.Config{
+		Host:          "127.0.0.1",
+		Port:          "2222",
+		KeyFile:       "/path/to/ssh_host_key",
+		AuthType:      "/path/to/authorized_keys",
+		WorkDir:       "/srv/ssh",
+		SFTP:          true,
+		TCPForwarding: false,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := server.StartContext(ctx); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+`WorkDir` is shared by shells, remote commands, and SFTP. If it is empty, `NewServer` uses the process working directory. SFTP and TCP forwarding are disabled unless enabled in `Config`. Zero `HandshakeTimeout` and `MaxPendingHandshakes` values select the safe defaults (10 seconds and 64); negative values disable the corresponding protection. `StartWithContext` accepts an existing `net.Listener` when the caller needs to control address selection.
+
+For in-memory public-key authentication, set `AuthKeys` and leave `AuthType` empty. `AuthKeys` accepts bare `ssh.PublicKey` values only: keys are not tied to login names, and `authorized_keys` options or per-key restrictions cannot be expressed. File-based authentication validates the file at startup, reloads it for each public-key authentication, and denies authentication whenever a reload cannot produce a valid unrestricted key set. Any parsed entry with `authorized_keys` options invalidates the whole file.
+
+Custom handler maps cannot reuse names reserved by enabled shell/session, SFTP, or forwarding handlers; `NewServer` reports those conflicts as configuration errors. The older [`server` package](https://pkg.go.dev/github.com/jpillora/sshd-lite/server) remains only as a deprecated compatibility layer; new code should use `sshd` and, for lower-level protocol handling, [`xssh`](https://pkg.go.dev/github.com/jpillora/sshd-lite/xssh).
 
 #### MIT License
 

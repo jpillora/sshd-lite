@@ -5,27 +5,37 @@ This document provides guidance for AI assistants working on sshd-lite.
 ## Project Overview
 
 sshd-lite is a lightweight SSH daemon written in Go. It supports:
-- Remote shells (bash on Linux/Mac, powershell on Windows)
+
+- Interactive shells (bash on Linux/macOS, PowerShell on Windows)
+- Remote command execution with SSH stdin, stdout, stderr, and exit-status semantics
 - Password and public key authentication
 - SFTP subsystem (`--sftp`)
-- TCP forwarding (`--tcp-forwarding`)
+- Local and reverse TCP forwarding (`--tcp-forwarding`)
 - Ed25519 and RSA server keys
+
+Authenticated SSH names do not select operating-system users. Shells and commands run with the same privileges as the sshd-lite process; there is no system-user lookup or privilege switching.
 
 ## Development Commands
 
 ### Testing
+
 ```bash
-go test ./...          # Run all tests
-go test -v ./server    # Run server tests with verbose output
+go test ./...                 # Run all tests in the root module
+go test -race ./...           # Run the root test suite with the race detector
+go test -v ./sshd ./xssh      # Run the core package tests verbosely
+go vet ./...                  # Vet the root module
+go generate ./...             # Regenerate README CLI help from main.go
 ```
 
 ### Building
+
 ```bash
 go build .             # Build the main binary
 go run . --help        # Run with help output
 ```
 
 ### Running the Server
+
 ```bash
 go run . user:pass                    # Basic auth on default port (22, fallback 2200)
 go run . --port 2222 user:pass        # Custom port
@@ -36,34 +46,49 @@ go run . --tcp-forwarding user:pass   # Enable TCP forwarding
 ```
 
 ### CI/Release
-- Push to `master` triggers tests on Windows/macOS/Ubuntu
-- Tags matching `v*` trigger GoReleaser to build and release binaries
-- Docker images are published to GHCR
+
+- Every push and pull request builds and tests with stable Go on Ubuntu, macOS, and Windows.
+- Tags matching `v*` trigger GoReleaser binary publication and multi-platform Docker publication to GHCR after tests pass.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `main.go` | CLI entrypoint |
-| `server/server.go` | SSH server main loop |
-| `server/server_config.go` | SSH config and auth setup |
-| `server/key_utils.go` | Key generation (RSA/Ed25519) |
-| `server/pty_unix.go` | PTY handling for Unix |
-| `server/pty_win.go` | PTY handling for Windows |
+| `sshd/config.go` | Public high-level server configuration and handler types |
+| `sshd/server.go` | Listener lifecycle, context shutdown, and handshake admission |
+| `sshd/server_config.go` | Host-key, shell/workdir, and authentication setup |
+| `sshd/server_conn.go` | SSH handshake and per-connection dispatch |
+| `sshd/handler_validation.go` | High-level built-in/custom handler conflict checks |
+| `sshd/key/` | RSA/Ed25519 key generation and authorized-key parsing |
+| `xssh/config.go` | Lower-level SSH connection configuration and handler APIs |
+| `xssh/conn.go` | Protocol handler registration and connection serving |
+| `xssh/session_handler.go` | PTY, shell, environment, and exec request handling |
+| `xssh/sftp.go` | SFTP subsystem implementation |
+| `xssh/tcp_fwd.go` | Local and reverse TCP forwarding |
+| `server/compat.go` | Deprecated compatibility aliases for older imports |
+| `sshd/sshtest/` | Integration harness, scenarios, and protocol test support |
+| `winpty/` | Windows PTY compatibility module |
 | `go.work` | Go workspace (main + winpty modules) |
 
 ## Go Workspace
 
 The project uses Go workspaces to manage the `winpty` subdirectory as a separate module:
-- `go.work` declares both `.` and `./winpty` as workspace members
-- No `replace` directives needed in go.mod
-- Run `go mod tidy` to update dependencies
+
+- `go.work` declares both `.` and `./winpty` as workspace members and currently requires Go 1.26.5.
+- The root module uses `github.com/creack/pty` directly. `winpty/go.mod` has a Windows-specific replacement to `github.com/photostorm/pty`.
+- Run `go mod tidy` for the root module. Check the nested module independently with `cd winpty && GOWORK=off go mod tidy`.
 
 ## Common Issues
 
-- **Ed25519 keys**: Use `ssh.MarshalPrivateKey` to serialize Ed25519 keys, not raw bytes
-- **Windows PTY**: The winpty module uses a replace directive for `github.com/creack/pty`
-- **Port fallback**: Server tries 22 first, falls back to 2200 if in use
+- **Ed25519 keys**: Use `ssh.MarshalPrivateKey` to serialize Ed25519 keys, not raw bytes.
+- **Work directory**: `sshd.NewServer` resolves an empty `Config.WorkDir` to the process working directory. Shells, exec commands, and high-level SFTP all use that directory.
+- **Authorized keys**: File authentication accepts unrestricted keys only. Any parsed entry with options rejects the whole file. The file is reloaded for every public-key authentication, and reload errors deny authentication until it is valid again.
+- **Programmatic keys**: `Config.AuthKeys` is mutually exclusive with `AuthType`; it accepts bare public keys and cannot express `authorized_keys` options, username bindings, or per-key restrictions.
+- **Handshake protection**: Zero `HandshakeTimeout` and `MaxPendingHandshakes` values select the defaults (10 seconds and 64). Negative values disable the corresponding protection.
+- **Handler conflicts**: `sshd.NewServer` rejects custom handler names reserved by enabled built-ins. At the lower level, prefer `xssh.NewConnChecked` when configuration errors must be returned; `xssh.NewConn` panics on conflicts.
+- **Windows PTY**: The `winpty` module uses its own replace directive for `github.com/creack/pty`.
+- **Port fallback**: With an empty port, the server tries 22 first and falls back to 2200.
 
 # Meads (`md`) Task Tracking Context
 

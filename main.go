@@ -18,22 +18,25 @@ var version string = "0.0.0-src" //set via ldflags
 const authArg = `
 <auth> must be set to one of:
 1. a username and password string separated by a colon ("myuser:mypass")
-2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys"); if any
-   entry has authorized_keys options, the entire file is rejected
-3. an authorized github user ("github.com/myuser") public keys from .keys
+2. a path to an ssh authorized_keys file ("~/.ssh/authorized_keys"); entries
+   must be unrestricted, and any entry with options makes the file invalid
+3. a GitHub user ("github.com/myuser"); public keys are fetched from .keys
 4. "none" to disable client authentication :WARNING: very insecure
 `
 
 const notes = `
 Notes:
-* if no keyfile and no keyseed are set, a random RSA2048 key is used
-* authorized_keys files are automatically reloaded; if any entry has options,
-  the entire file is rejected, not partially accepted
-* once authenticated, clients will have access to a shell of the
-  current user. sshd-lite does not lookup system users.
-* sshd-lite only supports remotes shells, sftp, and tcp forwarding. command
-  execution are not currently supported.
-* sftp working directory is the home directory of the user
+* if no keyfile and no keyseed are set, a random 2048-bit RSA key is used
+* authorized_keys files are validated at startup and reloaded for every public
+  key authentication; a failed reload denies authentication until the file is
+  valid again, and any entry with options makes the entire file invalid
+* authenticated names do not select system users or change privileges; shells
+  and commands run as the user that started sshd-lite
+* remote commands stream stdin, stdout, and stderr and report their exit status
+* shells, commands, and SFTP start in workdir; if unset, it is the process
+  working directory when the server is created
+* handshake-timeout and max-pending-handshakes use safe defaults when zero;
+  set either to a negative value to disable that protection
 `
 
 func main() {
