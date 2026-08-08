@@ -3,14 +3,19 @@ package sshd
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strings"
-	"time"
+	"sync"
 
 	"github.com/jpillora/sshd-lite/sshd/key"
 	"github.com/jpillora/sshd-lite/xssh"
 	"golang.org/x/crypto/ssh"
 )
+
+// maxAuthorizedKeysFileSize bounds per-authentication read and parse work while
+// leaving room for thousands of ordinary authorized_keys entries.
+const maxAuthorizedKeysFileSize = 1 << 20
 
 func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	sc := &ssh.ServerConfig{}
@@ -100,21 +105,24 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 	return sc, nil
 }
 
-func (s *Server) loadAuthTypeFile(last time.Time) (map[string]string, time.Time, error) {
-	info, err := os.Stat(s.config.AuthType)
+func (s *Server) loadAuthTypeFile() (key.Map, error) {
+	file, err := os.Open(s.config.AuthType)
 	if err != nil {
-		return nil, last, fmt.Errorf("missing auth keys file")
+		return nil, fmt.Errorf("read authorized keys file %q: %w", s.config.AuthType, err)
 	}
-	t := info.ModTime()
-	if t.Before(last) || t.Equal(last) {
-		return nil, last, fmt.Errorf("not updated")
+	defer file.Close()
+	b, err := io.ReadAll(io.LimitReader(file, maxAuthorizedKeysFileSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("read authorized keys file %q: %w", s.config.AuthType, err)
 	}
-	b, _ := os.ReadFile(s.config.AuthType)
+	if len(b) > maxAuthorizedKeysFileSize {
+		return nil, fmt.Errorf("read authorized keys file %q: exceeds %d-byte limit", s.config.AuthType, maxAuthorizedKeysFileSize)
+	}
 	keys, err := key.ParseKeys(b)
 	if err != nil {
-		return nil, last, err
+		return nil, fmt.Errorf("parse authorized keys file %q: %w", s.config.AuthType, err)
 	}
-	return keys, t, nil
+	return keys, nil
 }
 
 func (s *Server) githubCallback(username string, sc *ssh.ServerConfig) error {
@@ -131,20 +139,42 @@ func (s *Server) githubCallback(username string, sc *ssh.ServerConfig) error {
 }
 
 func (s *Server) fileCallback(sc *ssh.ServerConfig) error {
-	//initial key parse
-	keys, last, err := s.loadAuthTypeFile(time.Time{})
+	// Validate the file before accepting connections. Each authentication attempt
+	// reloads it independently so replacements and revocations take effect
+	// immediately without sharing mutable callback state.
+	keys, err := s.loadAuthTypeFile()
 	if err != nil {
-		return err
+		return fmt.Errorf("initialize authorized keys: %w", err)
 	}
-	//setup checker
-	sc.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-		//update keys
-		if ks, t, err := s.loadAuthTypeFile(last); err == nil {
-			keys = ks
-			last = t
-			s.debugf("Updated authorized keys")
+	var failureLog struct {
+		sync.Mutex
+		last string
+	}
+	authorize := func(pubkey ssh.PublicKey) (*ssh.Permissions, error) {
+		keys, err := s.loadAuthTypeFile()
+		if err != nil {
+			message := err.Error()
+			failureLog.Lock()
+			if failureLog.last != message {
+				s.errorf("Failed to reload authorized keys: %s", err)
+				failureLog.last = message
+			}
+			failureLog.Unlock()
+			return nil, fmt.Errorf("denied")
 		}
-		return nil, s.matchKeys(key, keys)
+		failureLog.Lock()
+		failureLog.last = ""
+		failureLog.Unlock()
+		return nil, s.matchKeys(pubkey, keys)
+	}
+	sc.PublicKeyCallback = func(conn ssh.ConnMetadata, pubkey ssh.PublicKey) (*ssh.Permissions, error) {
+		return authorize(pubkey)
+	}
+	// PublicKeyCallback results are cached between the unsigned key query and
+	// the signed authentication request. Recheck after signature verification
+	// so a revocation during that window is enforced for the current handshake.
+	sc.VerifiedPublicKeyCallback = func(conn ssh.ConnMetadata, pubkey ssh.PublicKey, permissions *ssh.Permissions, signatureAlgorithm string) (*ssh.Permissions, error) {
+		return authorize(pubkey)
 	}
 	s.infof("Authentication enabled (public keys #%d)", len(keys))
 	return nil
