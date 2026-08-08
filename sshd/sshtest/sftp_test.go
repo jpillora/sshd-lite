@@ -185,6 +185,37 @@ func assertFileBytes(t *testing.T, path string, want []byte) {
 	}
 }
 
+// yamlQuote renders a value as a YAML double-quoted scalar. Backslashes must be
+// escaped as well as quotes: Windows paths carry them, and YAML would otherwise
+// read sequences such as "\U" in C:\Users\... as character escapes.
 func yamlQuote(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value) + `"`
+}
+
+// TestYAMLQuoteEscapesPathSeparators keeps the Windows regression reachable from
+// every platform. Real Windows temp paths only appear in the SFTP scenarios when
+// the tests run on Windows, so the literal paths are spelled out here.
+func TestYAMLQuoteEscapesPathSeparators(t *testing.T) {
+	paths := []string{
+		`C:\Users\runneradmin\AppData\Local\Temp\Test\001\action-upload.txt`,
+		`C:\next\upload.txt`,
+		`C:\x41\file.txt`,
+		`/tmp/Test/001/action-upload.txt`,
+		`/tmp/quote"in/name.txt`,
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			sc, err := scenario.Parse("name: quoting\nsteps:\n  - client: test\n    actions:\n" +
+				"      - sftp_upload:\n" +
+				"          local: " + yamlQuote(path) + "\n" +
+				"          remote: remote.txt\n")
+			if err != nil {
+				t.Fatalf("parse scenario carrying %q: %v", path, err)
+			}
+			got := sc.Steps[0].Actions[0].Params["local"]
+			if got != path {
+				t.Fatalf("round-tripped local path = %q, want %q", got, path)
+			}
+		})
+	}
 }

@@ -2,12 +2,15 @@
 name: echo command
 description: Test that echo command works via exec
 
+# The argument is a single token on purpose. PowerShell's echo is an alias for
+# Write-Output, which emits one line per argument, so "echo hello world" would
+# produce two lines on Windows and break this fixture's portability.
 steps:
   - client: test
     actions:
       - connect
-      - exec: "echo hello world"
+      - exec: "echo hello-world"
     expect:
-      - output: "hello world"
+      - output: "hello-world"
       - exit_code: 0
       - event: exec.completed
