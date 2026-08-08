@@ -65,11 +65,16 @@ func GitHubKeys(user string) (Map, error) {
 	return ParseKeys(b)
 }
 
+// ParseKeys parses unrestricted public keys from authorized_keys data.
+// Authorized_keys options are rejected because callers cannot enforce them.
 func ParseKeys(b []byte) (Map, error) {
 	lines := bytes.Split(b, []byte("\n"))
 	m := Map{}
-	for _, l := range lines {
-		if key, cmt, _, _, err := ssh.ParseAuthorizedKey(l); err == nil {
+	for i, l := range lines {
+		if key, cmt, options, _, err := ssh.ParseAuthorizedKey(l); err == nil {
+			if len(options) > 0 {
+				return nil, fmt.Errorf("authorized key on line %d has unsupported options", i+1)
+			}
 			m[string(key.Marshal())] = cmt
 		}
 	}

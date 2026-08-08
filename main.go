@@ -18,7 +18,8 @@ var version string = "0.0.0-src" //set via ldflags
 const authArg = `
 <auth> must be set to one of:
 1. a username and password string separated by a colon ("myuser:mypass")
-2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys")
+2. a path to an ssh authorized keys file ("~/.ssh/authorized_keys"); if any
+   entry has authorized_keys options, the entire file is rejected
 3. an authorized github user ("github.com/myuser") public keys from .keys
 4. "none" to disable client authentication :WARNING: very insecure
 `
@@ -26,7 +27,8 @@ const authArg = `
 const notes = `
 Notes:
 * if no keyfile and no keyseed are set, a random RSA2048 key is used
-* authorized_key files are automatically reloaded on change
+* authorized_keys files are automatically reloaded; if any entry has options,
+  the entire file is rejected, not partially accepted
 * once authenticated, clients will have access to a shell of the
   current user. sshd-lite does not lookup system users.
 * sshd-lite only supports remotes shells, sftp, and tcp forwarding. command

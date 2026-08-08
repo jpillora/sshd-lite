@@ -76,6 +76,28 @@ func TestFileAuthInitialLoadFailsClosed(t *testing.T) {
 	}
 }
 
+func TestFileAuthInitialLoadRejectsAuthorizedKeyOptions(t *testing.T) {
+	signer, err := sshdkey.SignerFromSeed("file-auth-initial-options")
+	if err != nil {
+		t.Fatalf("generate signer: %v", err)
+	}
+	const sensitiveCommand = "INITIAL-SENSITIVE-FORCED-COMMAND-7216"
+	path := filepath.Join(t.TempDir(), "authorized_keys")
+	writeAuthFile(t, path, []byte(`command="`+sensitiveCommand+`" `+strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))+"\n"))
+
+	_, err = NewServer(fileAuthConfig(path, nil))
+	if err == nil {
+		t.Fatal("NewServer accepted an option-bearing authorized key")
+	}
+	if got := err.Error(); !strings.Contains(got, "initialize authorized keys") ||
+		!strings.Contains(got, "line 1") ||
+		!strings.Contains(got, "unsupported options") {
+		t.Fatalf("NewServer error %q lacks clear authorized_keys option context", got)
+	} else if strings.Contains(got, sensitiveCommand) {
+		t.Fatalf("NewServer error exposed authorized_keys option data: %q", got)
+	}
+}
+
 func TestPasswordAuthenticationLogsDoNotExposeCredentials(t *testing.T) {
 	const (
 		username           = "password-log-user"
@@ -278,6 +300,51 @@ func TestFileAuthConcurrentReload(t *testing.T) {
 	}
 }
 
+func TestFileAuthOptionBearingReloadDeniesAndRecovers(t *testing.T) {
+	signer, err := sshdkey.SignerFromSeed("file-auth-option-reload")
+	if err != nil {
+		t.Fatalf("generate signer: %v", err)
+	}
+	entry := ssh.MarshalAuthorizedKey(signer.PublicKey())
+	path := filepath.Join(t.TempDir(), "authorized_keys")
+	writeAuthFile(t, path, entry)
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	server, err := NewServer(fileAuthConfig(path, logger))
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+	requireSSHHandshakeSuccess(t, waitSSHHandshake(t, startSSHHandshake(t, server.sshConfig, signer)))
+
+	const sensitiveCommand = "RELOAD-SENSITIVE-FORCED-COMMAND-1659"
+	restricted := []byte(`command="` + sensitiveCommand + `",no-port-forwarding ` + strings.TrimSpace(string(entry)) + "\n")
+	replaceAuthFile(t, path, restricted)
+	requireFileAuth(t, server.sshConfig.PublicKeyCallback, signer.PublicKey(), false)
+	_, err = server.sshConfig.VerifiedPublicKeyCallback(nil, signer.PublicKey(), nil, ssh.KeyAlgoED25519)
+	if err == nil || err.Error() != "denied" {
+		t.Fatalf("verified callback returned %v for option-bearing file, want denied", err)
+	}
+
+	denied := waitSSHHandshake(t, startSSHHandshake(t, server.sshConfig, signer))
+	if denied.clientErr == nil {
+		t.Fatal("SSH handshake authenticated a restricted key as unrestricted")
+	}
+	if got := denied.clientErr.Error(); strings.Contains(got, path) || strings.Contains(got, "authorized keys") || strings.Contains(got, sensitiveCommand) {
+		t.Fatalf("client error exposed authorized_keys reload details: %v", denied.clientErr)
+	}
+	if got := logs.String(); !strings.Contains(got, "unsupported options") || strings.Contains(got, sensitiveCommand) {
+		t.Fatalf("reload log lacks a safe cause or exposes option data: %s", got)
+	}
+
+	replaceAuthFile(t, path, entry)
+	requireFileAuth(t, server.sshConfig.PublicKeyCallback, signer.PublicKey(), true)
+	if _, err := server.sshConfig.VerifiedPublicKeyCallback(nil, signer.PublicKey(), nil, ssh.KeyAlgoED25519); err != nil {
+		t.Fatalf("verified callback did not recover after clean replacement: %v", err)
+	}
+	requireSSHHandshakeSuccess(t, waitSSHHandshake(t, startSSHHandshake(t, server.sshConfig, signer)))
+}
+
 func TestFileAuthRechecksAfterSignatureVerification(t *testing.T) {
 	signer, err := sshdkey.SignerFromSeed("file-auth-signed-request")
 	if err != nil {
@@ -324,14 +391,15 @@ func TestFileAuthRechecksAfterSignatureVerification(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for public-key query approval")
 	}
-	writeAuthFile(t, path, nil)
+	const sensitiveCommand = "SIGNED-WINDOW-SENSITIVE-COMMAND-4382"
+	replaceAuthFile(t, path, []byte(`command="`+sensitiveCommand+`" `+strings.TrimSpace(string(entry))+"\n"))
 	close(resumeQuery)
 
 	revoked := waitSSHHandshake(t, result)
 	if revoked.clientErr == nil {
 		t.Fatal("signed authentication succeeded with a key revoked after its query")
 	}
-	if strings.Contains(revoked.clientErr.Error(), path) || strings.Contains(revoked.clientErr.Error(), "authorized keys") {
+	if strings.Contains(revoked.clientErr.Error(), path) || strings.Contains(revoked.clientErr.Error(), "authorized keys") || strings.Contains(revoked.clientErr.Error(), sensitiveCommand) {
 		t.Fatalf("client error exposed authorized-key reload details: %v", revoked.clientErr)
 	}
 	select {
@@ -372,6 +440,38 @@ func writeAuthFile(t *testing.T, path string, contents []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, contents, 0o600); err != nil {
 		t.Fatalf("write authorized keys: %v", err)
+	}
+}
+
+func replaceAuthFile(t *testing.T, path string, contents []byte) {
+	t.Helper()
+	temp, err := os.CreateTemp(filepath.Dir(path), ".authorized-keys-replacement-*")
+	if err != nil {
+		t.Fatalf("create authorized keys replacement: %v", err)
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		t.Fatalf("chmod authorized keys replacement: %v", err)
+	}
+	if _, err := temp.Write(contents); err != nil {
+		temp.Close()
+		t.Fatalf("write authorized keys replacement: %v", err)
+	}
+	if err := temp.Close(); err != nil {
+		t.Fatalf("close authorized keys replacement: %v", err)
+	}
+	if err := os.Rename(tempPath, path); err == nil {
+		return
+	}
+	// Windows cannot replace an existing file with os.Rename. The callbacks
+	// still fail closed during this short remove-and-rename fallback.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove old authorized keys file: %v", err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		t.Fatalf("install authorized keys replacement: %v", err)
 	}
 }
 

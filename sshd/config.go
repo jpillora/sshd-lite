@@ -41,8 +41,10 @@ type Config struct {
 	SFTP                 bool `opts:"short=s,help=enable the SFTP subsystem (disabled by default)"`
 	TCPForwarding        bool `opts:"name=tcp-forwarding,short=t,help=enable TCP forwarding (both local and reverse; disabled by default)"`
 	// programmatic options
-	KeyBytes []byte          `opts:"-"`
-	Logger   *slog.Logger    `opts:"-"`
+	KeyBytes []byte       `opts:"-"`
+	Logger   *slog.Logger `opts:"-"`
+	// AuthKeys authorizes these programmatic keys without authorized_keys options
+	// or per-key restrictions.
 	AuthKeys []ssh.PublicKey `opts:"-"`
 	// ConnectionHandler is called when a new SSH connection is established.
 	// The context is cancelled when the connection closes. The handler runs

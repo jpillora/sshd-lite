@@ -1,6 +1,7 @@
 package key_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jpillora/sshd-lite/sshd"
@@ -156,6 +157,105 @@ func TestParseKeysEmpty(t *testing.T) {
 	_, err := key.ParseKeys([]byte(""))
 	if err == nil {
 		t.Fatal("expected error for empty keys")
+	}
+}
+
+func TestParseKeysRejectsAuthorizedKeyOptions(t *testing.T) {
+	t.Parallel()
+
+	entry, err := key.AuthorizedKeyEntry("authorized-key-options")
+	if err != nil {
+		t.Fatalf("generate authorized key: %v", err)
+	}
+	entry = strings.TrimSpace(entry)
+	tests := []struct {
+		name      string
+		options   string
+		sensitive string
+	}{
+		{name: "common flags", options: "restrict,no-pty,no-port-forwarding"},
+		{name: "cert authority", options: "cert-authority"},
+		{name: "source restriction", options: `from="sensitive.example.invalid"`, sensitive: "sensitive.example.invalid"},
+		{name: "key value", options: `permitopen="sensitive.internal:1234"`, sensitive: "sensitive.internal:1234"},
+		{name: "quoted forced command with comma and spaces", options: `command="sensitive command, with spaces"`, sensitive: "sensitive command, with spaces"},
+		{name: "unknown", options: "future-unknown-option"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := key.ParseKeys([]byte("# comment\n\n" + tt.options + " " + entry + "\n"))
+			if err == nil {
+				t.Fatal("ParseKeys accepted an option-bearing authorized key")
+			}
+			if got := err.Error(); !strings.Contains(got, "line 3") || !strings.Contains(got, "unsupported options") {
+				t.Fatalf("ParseKeys error %q lacks safe line and cause context", got)
+			} else if strings.Contains(got, tt.options) || tt.sensitive != "" && strings.Contains(got, tt.sensitive) {
+				t.Fatalf("ParseKeys error exposed authorized_keys option data: %q", got)
+			}
+		})
+	}
+}
+
+func TestParseKeysCRLFRestrictedEntryRejectsWholeInput(t *testing.T) {
+	t.Parallel()
+
+	unrestricted, err := key.AuthorizedKeyEntry("unrestricted-before-restricted")
+	if err != nil {
+		t.Fatalf("generate unrestricted key: %v", err)
+	}
+	restricted, err := key.AuthorizedKeyEntry("restricted-after-unrestricted")
+	if err != nil {
+		t.Fatalf("generate restricted key: %v", err)
+	}
+	input := strings.TrimSpace(unrestricted) + "\r\n" + `command="sensitive forced command" ` + strings.TrimSpace(restricted) + "\r\n"
+	keys, err := key.ParseKeys([]byte(input))
+	if err == nil {
+		t.Fatalf("ParseKeys accepted a restricted entry and returned %d keys", len(keys))
+	}
+	if len(keys) != 0 {
+		t.Fatalf("ParseKeys returned %d keys from a rejected CRLF input, want none", len(keys))
+	}
+	if got := err.Error(); !strings.Contains(got, "line 2") || strings.Contains(got, "sensitive forced command") {
+		t.Fatalf("ParseKeys returned unsafe or unclear error: %q", got)
+	}
+}
+
+func TestParseKeysAcceptsCommentsBlankLinesAndUnrestrictedKeys(t *testing.T) {
+	t.Parallel()
+
+	first, err := key.AuthorizedKeyEntry("unrestricted-first")
+	if err != nil {
+		t.Fatalf("generate first key: %v", err)
+	}
+	second, err := key.AuthorizedKeyEntry("unrestricted-second")
+	if err != nil {
+		t.Fatalf("generate second key: %v", err)
+	}
+	keys, err := key.ParseKeys([]byte("\n# comment\n  # indented comment\n" + first + "\n" + second + "\n"))
+	if err != nil {
+		t.Fatalf("ParseKeys rejected unrestricted keys: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("ParseKeys returned %d keys, want 2", len(keys))
+	}
+}
+
+func TestParseKeysDuplicateUsesLastComment(t *testing.T) {
+	t.Parallel()
+
+	publicKey, err := key.PublicKeyFromSeed("duplicate-unrestricted-key")
+	if err != nil {
+		t.Fatalf("generate public key: %v", err)
+	}
+	entry := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(publicKey)))
+	keys, err := key.ParseKeys([]byte(entry + " first comment\n" + entry + " last comment\n"))
+	if err != nil {
+		t.Fatalf("ParseKeys rejected duplicate unrestricted keys: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("ParseKeys returned %d duplicate keys, want 1", len(keys))
+	}
+	if got := keys[string(publicKey.Marshal())]; got != "last comment" {
+		t.Fatalf("duplicate key comment = %q, want last comment", got)
 	}
 }
 
