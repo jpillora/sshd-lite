@@ -1,5 +1,5 @@
 # test this file with
-#   goreleaser release --config goreleaser.yml --clean --skip publish
+#   goreleaser release --config .github/goreleaser.yml --clean --snapshot
 version: 2
 builds:
   - env:
@@ -35,7 +35,8 @@ nfpms:
       - rpm
       - apk
 archives:
-  - format: gz
+  - formats:
+      - gz
     files:
       - none*
 changelog:
