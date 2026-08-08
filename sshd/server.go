@@ -14,8 +14,9 @@ import (
 
 // Server is a simple SSH Daemon
 type Server struct {
-	config    Config
-	sshConfig *ssh.ServerConfig
+	config     Config
+	sshConfig  *ssh.ServerConfig
+	handshakes chan struct{}
 
 	// xssh configuration built from sshd config
 	xsshConfig *xssh.Config
@@ -23,6 +24,12 @@ type Server struct {
 
 // NewServer creates a new Server
 func NewServer(c Config) (*Server, error) {
+	if c.HandshakeTimeout == 0 {
+		c.HandshakeTimeout = DefaultHandshakeTimeout
+	}
+	if c.MaxPendingHandshakes == 0 {
+		c.MaxPendingHandshakes = DefaultMaxPendingHandshakes
+	}
 	if l := c.Logger; l == nil && !c.LogQuiet {
 		h := jplog.Handler(os.Stdout)
 		if c.LogVerbose {
@@ -32,6 +39,9 @@ func NewServer(c Config) (*Server, error) {
 		c.Logger = l
 	}
 	s := &Server{config: c}
+	if c.MaxPendingHandshakes > 0 {
+		s.handshakes = make(chan struct{}, c.MaxPendingHandshakes)
+	}
 	sc, err := s.computeSSHConfig()
 	if err != nil {
 		return nil, err
@@ -156,7 +166,32 @@ func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
 		if err != nil {
 			return fmt.Errorf("accept failed: %w", err)
 		}
-		go s.HandleConn(tcpConn)
+		if !s.acquireHandshake() {
+			s.debugf("Rejecting connection from %s: too many pending SSH handshakes", tcpConn.RemoteAddr())
+			if err := tcpConn.Close(); err != nil {
+				s.debugf("Failed to close rejected connection from %s: %s", tcpConn.RemoteAddr(), err)
+			}
+			continue
+		}
+		go s.handleConn(tcpConn)
+	}
+}
+
+func (s *Server) acquireHandshake() bool {
+	if s.handshakes == nil {
+		return true
+	}
+	select {
+	case s.handshakes <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) releaseHandshake() {
+	if s.handshakes != nil {
+		<-s.handshakes
 	}
 }
 

@@ -78,6 +78,28 @@ $ sshd-lite --help
   3. an authorized github user ("github.com/myuser") public keys from .keys
   4. "none" to disable client authentication :WARNING: very insecure
 
+  Options:
+  --host, -h                    listening interface (defaults to all, default 0.0.0.0)
+  --port, -p                    listening port (defaults to 22 then fallsback to 2200)
+  --shell                       the shell to use for remote sessions (default bash/powershell, env
+                                SHELL)
+  --workdir, -w                 working directory for sessions (default current directory)
+  --keyfile, -k                 a filepath to a private key (for example an 'id_rsa' file)
+  --keyseed                     a string to use to seed key generation (env KEYSEED)
+  --keyseed-ec                  use elliptic curve for key generation (env KEYSEED_EC)
+  --keepalive                   server keep alive interval seconds (0 to disable, default 60)
+  --handshake-timeout           maximum time for an SSH handshake (negative to disable, default
+                                10s)
+  --max-pending-handshakes, -m  maximum concurrent unauthenticated SSH handshakes (negative to
+                                disable, default 64)
+  --noenv, -n                   ignore environment variables provided by the client
+  --verbose, -v                 verbose logs
+  --quiet, -q                   no logs
+  --sftp, -s                    enable the SFTP subsystem (disabled by default)
+  --tcp-forwarding, -t          enable TCP forwarding (both local and reverse; disabled by default)
+  --version                     display version
+  --help                        display help
+
   Notes:
   * if no keyfile and no keyseed are set, a random RSA2048 key is used
   * authorized_key files are automatically reloaded on change
@@ -86,22 +108,6 @@ $ sshd-lite --help
   * sshd-lite only supports remotes shells, sftp, and tcp forwarding. command
     execution are not currently supported.
   * sftp working directory is the home directory of the user
-
-  Options:
-  --host, -h            listening interface (defaults to all, default 0.0.0.0)
-  --port, -p            listening port (defaults to 22 then fallsback to 2200)
-  --shell               the shell to use for remote sessions (default bash/powershell, env SHELL)
-  --keyfile, -k         a filepath to a private key (for example an 'id_rsa' file)
-  --keyseed             a string to use to seed key generation
-  --keyseed-ec          use elliptic curve for key generation
-  --keepalive           server keep alive interval seconds (0 to disable, default 60)
-  --noenv, -n           ignore environment variables provided by the client
-  --verbose, -v         verbose logs
-  --quiet, -q           no logs
-  --sftp, -s            enable the SFTP subsystem (disabled by default)
-  --tcp-forwarding, -t  enable TCP forwarding (both local and reverse; disabled by default)
-  --version             display version
-  --help                display help
 
   Version:
     X.Y.Z

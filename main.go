@@ -35,8 +35,10 @@ Notes:
 
 func main() {
 	c := sshd.Config{
-		Host:      "0.0.0.0",
-		KeepAlive: 60,
+		Host:                 "0.0.0.0",
+		KeepAlive:            60,
+		HandshakeTimeout:     sshd.DefaultHandshakeTimeout,
+		MaxPendingHandshakes: sshd.DefaultMaxPendingHandshakes,
 	}
 
 	opts.New(&c).
