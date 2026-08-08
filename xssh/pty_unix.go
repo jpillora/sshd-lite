@@ -11,6 +11,8 @@ import (
 	"github.com/creack/pty"
 )
 
+const supportsRunningPTYResize = true
+
 func init() {
 	startPTY = func(cmd *exec.Cmd, ws *Winsize) (PTY, error) {
 		var pws *pty.Winsize
@@ -19,16 +21,13 @@ func init() {
 		}
 		return pty.StartWithSize(cmd, pws)
 	}
-}
-
-// SetWinsize sets the size of the given pty.
-func SetWinsize(t FdHolder, w, h uint32) error {
-	f, ok := t.(*os.File)
-	if !ok {
-		return fmt.Errorf("SetWinsize: expected *os.File, got %T", t)
+	setWinsize = func(t FdHolder, ws *Winsize) error {
+		f, ok := t.(*os.File)
+		if !ok {
+			return fmt.Errorf("SetWinsize: expected *os.File, got %T", t)
+		}
+		return pty.Setsize(f, &pty.Winsize{Rows: ws.Rows, Cols: ws.Cols})
 	}
-	ws := &pty.Winsize{Rows: uint16(h), Cols: uint16(w)}
-	return pty.Setsize(f, ws)
 }
 
 // closeShellPTY releases the shell PTY after the process has exited. On unix the

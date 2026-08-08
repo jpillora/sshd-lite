@@ -4,28 +4,28 @@
 package xssh
 
 import (
+	"errors"
 	"os/exec"
 
 	"github.com/jpillora/sshd-lite/winpty"
 )
 
+// photostorm/pty owns and asynchronously closes the ConPTY handle when the
+// child exits. It exposes no lock or closed signal that could make a concurrent
+// ResizePseudoConsole safe. Initial sizing is still applied before child start.
+const supportsRunningPTYResize = false
+
 func init() {
 	startPTY = func(cmd *exec.Cmd, ws *Winsize) (PTY, error) {
-		p, err := winpty.Start(cmd)
-		if err != nil {
-			return nil, err
-		}
+		var pws *winpty.Winsize
 		if ws != nil {
-			_ = winpty.Setsize(p, &winpty.Winsize{Rows: ws.Rows, Cols: ws.Cols})
+			pws = &winpty.Winsize{Rows: ws.Rows, Cols: ws.Cols}
 		}
-		return p, nil
+		return winpty.StartWithSize(cmd, pws)
 	}
-}
-
-// SetWinsize sets the size of the given pty.
-func SetWinsize(t FdHolder, w, h uint32) error {
-	ws := &winpty.Winsize{Rows: uint16(h), Cols: uint16(w)}
-	return winpty.Setsize(t, ws)
+	setWinsize = func(t FdHolder, ws *Winsize) error {
+		return errors.New("SetWinsize: resizing a running ConPTY is unsafe with the current backend")
+	}
 }
 
 // closeShellPTY releases the shell PTY after the process has exited. On Windows

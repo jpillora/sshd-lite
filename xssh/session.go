@@ -15,7 +15,9 @@ type Session struct {
 	// Env contains environment variables for this session.
 	Env []string
 	// Resizes receives terminal resize events (window-change requests).
-	// Each payload contains width and height as uint32 big-endian values.
+	// Each payload contains exactly width and height as uint32 big-endian
+	// values. Built-in handlers coalesce pending events so this channel never
+	// blocks the session request dispatcher.
 	Resizes chan []byte
 	// Logger for session-specific logging. If nil, uses connection logger.
 	Logger *slog.Logger

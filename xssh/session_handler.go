@@ -49,22 +49,118 @@ func errorf(sess *Session, f string, args ...interface{}) {
 
 // handlePtyReq handles "pty-req" session requests
 func handlePtyReq(sess *Session, req *Request) error {
-	if len(req.Payload) < 4 {
-		return fmt.Errorf("malformed pty-req payload")
+	ws, err := parsePtyRequest(req.Payload)
+	if err != nil {
+		return err
 	}
-	termLen := binary.BigEndian.Uint32(req.Payload[0:4])
-	if uint32(len(req.Payload)) < 4+termLen {
-		return fmt.Errorf("pty-req payload truncated: termLen=%d payloadLen=%d", termLen, len(req.Payload))
-	}
-	sess.Resizes <- req.Payload[4+termLen:]
+	queueResize(sess, ws)
 	debugf(sess, "PTY ready")
 	return nil
 }
 
 // handleWindowChange handles "window-change" session requests
 func handleWindowChange(sess *Session, req *Request) error {
-	sess.Resizes <- req.Payload
+	ws, err := parseWindowChange(req.Payload)
+	if err != nil {
+		return err
+	}
+	queueResize(sess, ws)
 	return nil
+}
+
+type ptyRequestPayload struct {
+	Term                    string
+	Columns, Rows           uint32
+	PixelWidth, PixelHeight uint32
+	Modes                   string
+}
+
+type windowChangePayload struct {
+	Columns, Rows           uint32
+	PixelWidth, PixelHeight uint32
+}
+
+func parsePtyRequest(payload []byte) (*Winsize, error) {
+	var p ptyRequestPayload
+	if err := ssh.Unmarshal(payload, &p); err != nil {
+		return nil, fmt.Errorf("malformed pty-req payload: %w", err)
+	}
+	if err := validateTerminalModes([]byte(p.Modes)); err != nil {
+		return nil, fmt.Errorf("malformed pty-req terminal modes: %w", err)
+	}
+	ws, err := winsizeFromDimensions(p.Columns, p.Rows)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pty-req dimensions: %w", err)
+	}
+	return ws, nil
+}
+
+func parseWindowChange(payload []byte) (*Winsize, error) {
+	var p windowChangePayload
+	if err := ssh.Unmarshal(payload, &p); err != nil {
+		return nil, fmt.Errorf("malformed window-change payload: %w", err)
+	}
+	ws, err := winsizeFromDimensions(p.Columns, p.Rows)
+	if err != nil {
+		return nil, fmt.Errorf("invalid window-change dimensions: %w", err)
+	}
+	return ws, nil
+}
+
+// validateTerminalModes checks the framing from RFC 4254 section 8. Opcodes
+// 1-159 carry one uint32 argument. Opcode 0 terminates the stream. Opcodes
+// 160-255 are undefined and cause parsing to stop, including when bytes remain
+// in the modes string because their extension framing is unknown to us.
+func validateTerminalModes(modes []byte) error {
+	for len(modes) > 0 {
+		opcode := modes[0]
+		modes = modes[1:]
+		switch {
+		case opcode == 0:
+			if len(modes) != 0 {
+				return fmt.Errorf("%d trailing bytes after TTY_OP_END", len(modes))
+			}
+			return nil
+		case opcode <= 159:
+			if len(modes) < 4 {
+				return fmt.Errorf("opcode %d has an incomplete uint32 argument", opcode)
+			}
+			modes = modes[4:]
+		default:
+			return nil
+		}
+	}
+	return fmt.Errorf("missing TTY_OP_END")
+}
+
+// queueResize gives resize traffic latest-value semantics. A slow PTY resize
+// consumer cannot stall request handling, and the next applied size is always
+// the newest request observed by the dispatcher. A nil size represents RFC
+// 4254's required handling for zero dimensions and is intentionally ignored.
+func queueResize(sess *Session, ws *Winsize) {
+	if ws == nil {
+		return
+	}
+	payload := marshalDims(ws)
+	select {
+	case sess.Resizes <- payload:
+		return
+	default:
+	}
+	for {
+		select {
+		case <-sess.Resizes:
+			continue
+		default:
+		}
+		break
+	}
+	select {
+	case sess.Resizes <- payload:
+	default:
+		// A direct external producer may have won the slot. Requests handled
+		// by the built-in dispatcher are serialized and do not take this path.
+	}
 }
 
 // handleEnv handles "env" session requests
@@ -151,9 +247,11 @@ func attachShell(sess *Session) error {
 	var initialSize *Winsize
 	select {
 	case payload := <-sess.Resizes:
-		if len(payload) >= 8 {
-			w, h := parseDims(payload)
-			initialSize = &Winsize{Cols: uint16(w), Rows: uint16(h)}
+		ws, err := parseDims(payload)
+		if err != nil {
+			errorf(sess, "Ignored invalid initial PTY size: %s", err)
+		} else {
+			initialSize = ws
 		}
 	default:
 	}
@@ -165,11 +263,38 @@ func attachShell(sess *Session) error {
 		return fmt.Errorf("could not start pty: %w", err)
 	}
 
+	// On platforms where this package owns PTY teardown (Unix), serialize it
+	// with resize operations. Windows running-PTY resizes are disabled below
+	// because its backend closes the ConPTY independently of this lock.
+	var ptyMu sync.Mutex
+	ptyClosed := false
+
 	// dequeue resizes
 	go func() {
 		for payload := range sess.Resizes {
-			w, h := parseDims(payload)
-			if err := SetWinsize(shellf, w, h); err != nil {
+			ws, err := parseDims(payload)
+			if err != nil {
+				errorf(sess, "Ignored invalid PTY resize: %s", err)
+				continue
+			}
+			if ws == nil {
+				continue
+			}
+			if !supportsRunningPTYResize {
+				// photostorm/pty closes the Windows ConPTY from its own process
+				// waiter. It exposes no lifecycle lock or closed signal, so any
+				// post-start ResizePseudoConsole call can race that close. The
+				// initial size was already applied atomically by StartWithSize.
+				continue
+			}
+			ptyMu.Lock()
+			if ptyClosed {
+				ptyMu.Unlock()
+				continue
+			}
+			err = SetWinsize(shellf, uint32(ws.Cols), uint32(ws.Rows))
+			ptyMu.Unlock()
+			if err != nil {
 				errorf(sess, "SetWinsize failed: %s", err)
 			}
 		}
@@ -207,7 +332,12 @@ func attachShell(sess *Session) error {
 			// Release the pty so the io.Copy goroutines unblock. On Windows the
 			// pty library closes the ConPTY itself; closing it again here would
 			// double-free the pseudoconsole handle and corrupt the heap.
-			closeShellPTY(shellf)
+			ptyMu.Lock()
+			if !ptyClosed {
+				closeShellPTY(shellf)
+				ptyClosed = true
+			}
+			ptyMu.Unlock()
 		}
 		debugf(sess, "Shell terminated")
 		once.Do(closeFunc)

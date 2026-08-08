@@ -243,7 +243,9 @@ func (c *xconn) HandleSessionChannel(newChannel ssh.NewChannel) error {
 		conn:    c,
 		Channel: channel,
 		Env:     os.Environ(),
-		Resizes: make(chan []byte, 10),
+		// Resize events use latest-value semantics. A capacity of one lets the
+		// request dispatcher replace a stale pending size without blocking.
+		Resizes: make(chan []byte, 1),
 		Logger:  c.config.Logger,
 	}
 	go c.handleSessionRequests(sess, requests)

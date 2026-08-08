@@ -2,6 +2,7 @@ package sshd_test
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"runtime"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jpillora/sshd-lite/sshd/sshtest"
+	"golang.org/x/crypto/ssh"
 )
 
 type testCase struct {
@@ -97,6 +99,81 @@ func TestExecStdin(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Timed out waiting for command to exit, stdin was never closed")
+	}
+}
+
+// TestMalformedResizeAfterShellKeepsConnectionUsable exercises the wire-level
+// failure path after a process has started. The malformed request must fail
+// without killing the shell dispatcher, SSH connection, or daemon.
+func TestMalformedResizeAfterShellKeepsConnectionUsable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the test harness shell command is Unix-specific")
+	}
+	server, err := sshtest.NewServer(sshtest.ServerWithNoAuth())
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	if err := server.Start(t.Context()); err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	defer server.Stop()
+
+	client, err := sshtest.CreateSSHClient(server.Addr())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+
+	shell, err := client.NewSession()
+	if err != nil {
+		t.Fatalf("new shell session: %v", err)
+	}
+	defer shell.Close()
+	shell.Stdout = io.Discard
+	shell.Stderr = io.Discard
+	stdin, err := shell.StdinPipe()
+	if err != nil {
+		t.Fatalf("open shell stdin: %v", err)
+	}
+	defer stdin.Close()
+	if err := shell.RequestPty("xterm", 24, 80, ssh.TerminalModes{ssh.ECHO: 1}); err != nil {
+		t.Fatalf("request PTY: %v", err)
+	}
+	if err := shell.Shell(); err != nil {
+		t.Fatalf("start shell: %v", err)
+	}
+
+	ok, err := shell.SendRequest("window-change", true, []byte{0, 0, 0})
+	if err != nil {
+		t.Fatalf("send malformed resize: %v", err)
+	}
+	if ok {
+		t.Fatal("malformed resize was accepted")
+	}
+
+	validResize := ssh.Marshal(&struct {
+		Columns, Rows           uint32
+		PixelWidth, PixelHeight uint32
+	}{Columns: 100, Rows: 30, PixelWidth: 800, PixelHeight: 480})
+	ok, err = shell.SendRequest("window-change", true, validResize)
+	if err != nil {
+		t.Fatalf("send valid resize after malformed resize: %v", err)
+	}
+	if !ok {
+		t.Fatal("valid resize after malformed resize was rejected")
+	}
+
+	later, err := client.NewSession()
+	if err != nil {
+		t.Fatalf("new session after malformed resize: %v", err)
+	}
+	defer later.Close()
+	out, err := later.CombinedOutput("echo still-alive")
+	if err != nil {
+		t.Fatalf("exec after malformed resize: %v", err)
+	}
+	if !strings.Contains(string(out), "still-alive") {
+		t.Fatalf("unexpected later session output: %q", out)
 	}
 }
 

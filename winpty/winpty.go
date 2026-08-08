@@ -22,6 +22,13 @@ func Start(cmd *exec.Cmd) (pty.Pty, error) {
 	return pty.Start(cmd)
 }
 
+// StartWithSize starts a new process after applying the initial pseudoconsole
+// size. On Windows this is the only point where the photostorm backend can
+// guarantee the child has not exited and closed its ConPTY handle yet.
+func StartWithSize(cmd *exec.Cmd, ws *Winsize) (pty.Pty, error) {
+	return pty.StartWithSize(cmd, ws)
+}
+
 // Setsize sets the size of the given pty.
 func Setsize(t FdHolder, ws *Winsize) error {
 	return pty.Setsize(t, ws)
