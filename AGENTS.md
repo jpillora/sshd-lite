@@ -84,6 +84,7 @@ The project uses Go workspaces to manage the `winpty` subdirectory as a separate
 - **Ed25519 keys**: Use `ssh.MarshalPrivateKey` to serialize Ed25519 keys, not raw bytes.
 - **Work directory**: `sshd.NewServer` resolves an empty `Config.WorkDir` to the process working directory. Shells, exec commands, and high-level SFTP all use that directory.
 - **Authorized keys**: File authentication accepts unrestricted keys only. Any parsed entry with options rejects the whole file. The file is reloaded for every public-key authentication, and reload errors deny authentication until it is valid again.
+- **Auth argument parsing**: `Config.AuthType` is read as `user:pass` when it contains a colon, except for a drive-qualified path such as `C:\keys\authorized_keys`, which is always treated as a file path. Reading one as a credential pair would silently enable password authentication with the drive letter as the user.
 - **Programmatic keys**: `Config.AuthKeys` is mutually exclusive with `AuthType`; it accepts bare public keys and cannot express `authorized_keys` options, username bindings, or per-key restrictions.
 - **Handshake protection**: Zero `HandshakeTimeout` and `MaxPendingHandshakes` values select the defaults (10 seconds and 64). Negative values disable the corresponding protection.
 - **Handler conflicts**: `sshd.NewServer` rejects custom handler names reserved by enabled built-ins. At the lower level, prefer `xssh.NewConnChecked` when configuration errors must be returned; `xssh.NewConn` panics on conflicts.

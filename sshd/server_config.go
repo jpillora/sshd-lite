@@ -86,10 +86,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 		if err := s.githubCallback(username, sc); err != nil {
 			return nil, err
 		}
-	} else if strings.Contains(s.config.AuthType, ":") {
-		pair := strings.SplitN(s.config.AuthType, ":", 2)
-		u := pair[0]
-		p := pair[1]
+	} else if u, p, ok := parseUserPass(s.config.AuthType); ok {
 		sc.PasswordCallback = func(conn ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			if conn.User() == u && subtle.ConstantTimeCompare(pass, []byte(p)) == 1 {
 				s.debugf("User '%s' authenticated with password", conn.User())
@@ -107,6 +104,31 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 		return nil, fmt.Errorf("missing key authorization configuration")
 	}
 	return sc, nil
+}
+
+// parseUserPass splits an auth argument into a username and password pair.
+//
+// A drive-qualified Windows path such as "C:\keys\authorized_keys" also
+// contains a colon, so it is deliberately never read as a credential pair.
+// Getting that wrong is not a cosmetic mistake: it silently swaps public key
+// authentication for password authentication with the drive letter as the user
+// and the rest of the path as the password. Rejecting the pair here instead
+// leaves the value to the file loader, which fails loudly when it cannot read
+// the file. The rule is platform independent so the classification of a given
+// argument does not change with the host operating system.
+func parseUserPass(auth string) (string, string, bool) {
+	if hasWindowsDriveLetter(auth) {
+		return "", "", false
+	}
+	return strings.Cut(auth, ":")
+}
+
+func hasWindowsDriveLetter(auth string) bool {
+	if len(auth) < 3 || auth[1] != ':' || (auth[2] != '\\' && auth[2] != '/') {
+		return false
+	}
+	drive := auth[0]
+	return ('a' <= drive && drive <= 'z') || ('A' <= drive && drive <= 'Z')
 }
 
 func (s *Server) loadAuthTypeFile() (key.Map, error) {

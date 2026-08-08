@@ -15,6 +15,45 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+func TestAuthTypeClassification(t *testing.T) {
+	tests := []struct {
+		name     string
+		auth     string
+		wantUser string
+		wantPass string
+		wantPair bool
+	}{
+		{name: "user and password", auth: "myuser:mypass", wantUser: "myuser", wantPass: "mypass", wantPair: true},
+		{name: "password containing colons", auth: "myuser:a:b", wantUser: "myuser", wantPass: "a:b", wantPair: true},
+		{name: "empty password", auth: "myuser:", wantUser: "myuser", wantPair: true},
+		{name: "relative path", auth: "authorized_keys"},
+		{name: "unix absolute path", auth: "/etc/ssh/authorized_keys"},
+		// A drive-qualified path must never authorize a password: reading
+		// "C:\keys" as user "C" would silently replace public key
+		// authentication with a password of "\keys".
+		{name: "windows backslash path", auth: `C:\ProgramData\ssh\authorized_keys`},
+		{name: "windows forward slash path", auth: "C:/ProgramData/ssh/authorized_keys"},
+		{name: "windows lowercase drive", auth: `d:\keys\authorized_keys`},
+		// A bare drive letter is not a path, so the pair reading still wins.
+		{name: "drive letter without separator", auth: "c:pass", wantUser: "c", wantPass: "pass", wantPair: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user, pass, ok := parseUserPass(tt.auth)
+			if ok != tt.wantPair {
+				t.Fatalf("parseUserPass(%q) pair = %v, want %v", tt.auth, ok, tt.wantPair)
+			}
+			if !ok {
+				return
+			}
+			if user != tt.wantUser || pass != tt.wantPass {
+				t.Fatalf("parseUserPass(%q) = %q, %q, want %q, %q", tt.auth, user, pass, tt.wantUser, tt.wantPass)
+			}
+		})
+	}
+}
+
 func TestFileAuthInitialLoadFailsClosed(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -477,6 +516,9 @@ func replaceAuthFile(t *testing.T, path string, contents []byte) {
 
 func requireFileAuth(t *testing.T, callback func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error), publicKey ssh.PublicKey, wantAllowed bool) {
 	t.Helper()
+	if callback == nil {
+		t.Fatal("server did not configure public key authentication")
+	}
 	_, err := callback(nil, publicKey)
 	if wantAllowed {
 		if err != nil {
