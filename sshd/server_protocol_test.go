@@ -143,9 +143,11 @@ func assertDirectTCPIPUsable(t *testing.T, client *ssh.Client) {
 		defer conn.Close()
 		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 		buf := make([]byte, 4)
-		if _, err := io.ReadFull(conn, buf); err == nil {
-			_, err = conn.Write(buf)
+		if _, err := io.ReadFull(conn, buf); err != nil {
+			serverDone <- err
+			return
 		}
+		_, err = conn.Write(buf)
 		serverDone <- err
 	}()
 	forwarded, err := client.Dial("tcp", listener.Addr().String())

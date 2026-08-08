@@ -224,8 +224,6 @@ type ClientOption func(*clientConfig)
 
 type clientConfig struct {
 	name     string
-	host     string
-	port     int
 	user     string
 	password string
 	keySeed  string
