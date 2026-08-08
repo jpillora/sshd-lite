@@ -400,7 +400,9 @@ func executeCommand(sess *Session, command string) {
 	}
 
 	exitCode := commandExitCode(err)
-	if err != nil {
+	if errors.Is(err, exec.ErrWaitDelay) {
+		debugf(sess, "Command exited successfully but left its output pipes open; closed them after %s", commandWaitDelay)
+	} else if err != nil {
 		debugf(sess, "Command execution failed: %s", err)
 	}
 	debugf(sess, "Command execution completed")
@@ -442,8 +444,15 @@ func commandExitCode(err error) uint32 {
 	if err == nil {
 		return 0
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return uint32(exitErr.ExitCode())
+	}
+	// Wait only substitutes ErrWaitDelay for a nil error, so the command itself
+	// succeeded and only its inherited output pipes had to be force-closed.
+	// Reporting a failure here would make backgrounded work look like an error.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return 0
 	}
 	return 1
 }

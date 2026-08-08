@@ -99,6 +99,46 @@ func TestCommandWaitDelayBoundsInheritedOutput(t *testing.T) {
 	cleanup()
 }
 
+func TestCommandExitCode(t *testing.T) {
+	// A command that exits non-zero yields an *exec.ExitError carrying its code.
+	failing := exec.Command(os.Args[0], "-test.run=^TestCommandExitCodeHelper$")
+	failing.Env = append(os.Environ(), "SSHD_LITE_EXIT_CODE_HELPER=3")
+	failingErr := failing.Run()
+
+	tests := []struct {
+		name string
+		err  error
+		want uint32
+	}{
+		{name: "success", err: nil, want: 0},
+		{name: "exit error keeps its code", err: failingErr, want: 3},
+		// Wait substitutes ErrWaitDelay only for a nil error, so the command
+		// succeeded and merely left inherited output pipes open.
+		{name: "wait delay is not a failure", err: exec.ErrWaitDelay, want: 0},
+		{name: "wrapped wait delay is not a failure", err: fmt.Errorf("wait: %w", exec.ErrWaitDelay), want: 0},
+		{name: "other errors report failure", err: errors.New("boom"), want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := commandExitCode(tt.err); got != tt.want {
+				t.Fatalf("commandExitCode(%v) = %d, want %d", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommandExitCodeHelper(t *testing.T) {
+	code, ok := os.LookupEnv("SSHD_LITE_EXIT_CODE_HELPER")
+	if !ok {
+		t.Skip("helper process only")
+	}
+	status, err := strconv.Atoi(code)
+	if err != nil {
+		t.Fatalf("invalid helper exit code %q: %v", code, err)
+	}
+	os.Exit(status)
+}
+
 func TestHandlePtyReqValidation(t *testing.T) {
 	valid := marshalPtyRequest(80, 24, []byte{ssh.ECHO, 0, 0, 0, 1, 0})
 	oversized := marshalPtyRequest(maxTerminalDimension+1, 24, []byte{0})
