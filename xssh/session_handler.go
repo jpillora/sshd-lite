@@ -336,26 +336,58 @@ func attachShell(sess *Session) error {
 
 	debugf(sess, "Shell attached")
 
+	releasePTY := func() {
+		// Release the pty so the io.Copy goroutines unblock. On Windows the
+		// pty library closes the ConPTY itself; closing it again here would
+		// double-free the pseudoconsole handle and corrupt the heap.
+		ptyMu.Lock()
+		if !ptyClosed {
+			closeShellPTY(shellf)
+			ptyClosed = true
+		}
+		ptyMu.Unlock()
+	}
+
 	sess.goTask(func() {
 		// Start proactively listening for process death, for those ptys that
 		// don't signal on EOF. This is the only Wait on shell.Process, so it is
 		// also what reaps the shell after closeFunc kills it.
 		if shell.Process != nil {
-			_, err := shell.Process.Wait()
-			if err != nil {
-				if !strings.Contains(err.Error(), "wait: no child processes") && !strings.Contains(err.Error(), "exit status") && !strings.Contains(err.Error(), "Wait was already called") {
-					errorf(sess, "Shell process wait error: %s", err)
+			// Reaping runs off the session's task set. Session, connection and
+			// server shutdown all wait for these tasks, and os.Process.Wait has
+			// been observed on darwin not to return even after the shell was
+			// signalled and killed. A stuck reaper must not be able to hold a
+			// server open, so waiting for it is bounded below.
+			reaped := make(chan error, 1)
+			go func() {
+				_, err := shell.Process.Wait()
+				reaped <- err
+			}()
+
+			var err error
+			timedOut := false
+			select {
+			case err = <-reaped:
+			case <-sess.Done():
+				// Make the shell actually go away before bounding the wait:
+				// closeFunc interrupts it and then kills it.
+				once.Do(closeFunc)
+				select {
+				case err = <-reaped:
+				case <-time.After(shellReapTimeout):
+					timedOut = true
 				}
 			}
-			// Release the pty so the io.Copy goroutines unblock. On Windows the
-			// pty library closes the ConPTY itself; closing it again here would
-			// double-free the pseudoconsole handle and corrupt the heap.
-			ptyMu.Lock()
-			if !ptyClosed {
-				closeShellPTY(shellf)
-				ptyClosed = true
+			if timedOut {
+				errorf(sess, "Shell did not exit within %s of shutdown; abandoning its reaper", shellReapTimeout)
+			} else if err != nil &&
+				!strings.Contains(err.Error(), "wait: no child processes") &&
+				!strings.Contains(err.Error(), "no child processes") &&
+				!strings.Contains(err.Error(), "exit status") &&
+				!strings.Contains(err.Error(), "Wait was already called") {
+				errorf(sess, "Shell process wait error: %s", err)
 			}
-			ptyMu.Unlock()
+			releasePTY()
 		}
 		debugf(sess, "Shell terminated")
 		once.Do(closeFunc)
@@ -415,6 +447,12 @@ func executeCommand(sess *Session, command string) {
 }
 
 const commandWaitDelay = 2 * time.Second
+
+// shellReapTimeout bounds how long session teardown waits to reap a shell that
+// has already been interrupted and killed. Shutdown correctness does not depend
+// on collecting the exit status, so this trades a possible zombie for a server
+// that always stops.
+const shellReapTimeout = 5 * time.Second
 
 func prepareCommand(cmd *exec.Cmd) {
 	setCommandProcessGroup(cmd)
