@@ -372,6 +372,12 @@ func attachShell(sess *Session) error {
 				// Make the shell actually go away before bounding the wait:
 				// closeFunc interrupts it and then kills it.
 				once.Do(closeFunc)
+				// Release the PTY here too. Teardown has already stopped the
+				// copy goroutine that drains the master, so a shell writing to
+				// a full PTY stays blocked in the kernel and never acts on the
+				// kill. Waiting for the reaper before closing the master would
+				// therefore wait on a shell that only this close can release.
+				releasePTY()
 				select {
 				case err = <-reaped:
 				case <-time.After(shellReapTimeout):
