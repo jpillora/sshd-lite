@@ -56,7 +56,25 @@ type xconn struct {
 // NewConn creates a new xssh.Conn from an established SSH connection.
 // The channels and requests parameters are the channels returned by
 // ssh.NewServerConn or ssh.NewClientConn.
+//
+// NewConn panics when config contains a custom handler that conflicts with an
+// enabled built-in handler. Use NewConnChecked when configuration can be
+// invalid and the caller needs to handle that error.
 func NewConn(sshConn ssh.Conn, channels <-chan ssh.NewChannel, requests <-chan *ssh.Request, config *Config) Conn {
+	conn, err := NewConnChecked(sshConn, channels, requests, config)
+	if err != nil {
+		panic(fmt.Sprintf("xssh.NewConn: %v; use NewConnChecked to handle invalid configuration", err))
+	}
+	return conn
+}
+
+// NewConnChecked validates config and creates a new xssh.Conn from an
+// established SSH connection. It returns a configuration error instead of
+// panicking when a custom handler conflicts with an enabled built-in handler.
+func NewConnChecked(sshConn ssh.Conn, channels <-chan ssh.NewChannel, requests <-chan *ssh.Request, config *Config) (Conn, error) {
+	if err := ValidateConfig(config); err != nil {
+		return nil, err
+	}
 	if config == nil {
 		config = &Config{}
 	}
@@ -80,7 +98,7 @@ func NewConn(sshConn ssh.Conn, channels <-chan ssh.NewChannel, requests <-chan *
 	maps.Copy(xc.subsystemHandlers, config.SubsystemHandlers)
 	// Register built-in handlers based on config flags
 	if config.SFTP {
-		xc.subsystemHandlers["sftp"] = NewSFTPHandler(SFTPConfig{
+		xc.subsystemHandlers[SFTPSubsystem] = NewSFTPHandler(SFTPConfig{
 			WorkDir: config.WorkingDirectory,
 			Logger:  config.Logger,
 		})
@@ -89,16 +107,16 @@ func NewConn(sshConn ssh.Conn, channels <-chan ssh.NewChannel, requests <-chan *
 		tfh := NewTCPForwardingHandler()
 		xc.tcpForwardingHandler = tfh
 		if config.LocalForwarding {
-			xc.channelHandlers["direct-tcpip"] = tfh.HandleDirectTCPIP
+			xc.channelHandlers[DirectTCPIPChannelType] = tfh.HandleDirectTCPIP
 		}
 		if config.RemoteForwarding {
-			xc.globalRequestHandlers["tcpip-forward"] = tfh.HandleTCPIPForward
-			xc.globalRequestHandlers["cancel-tcpip-forward"] = tfh.HandleCancelTCPIPForward
+			xc.globalRequestHandlers[TCPIPForwardRequestType] = tfh.HandleTCPIPForward
+			xc.globalRequestHandlers[CancelTCPIPForwardRequestType] = tfh.HandleCancelTCPIPForward
 		}
 	}
 	// Register built-in session handlers if SessionConfig is set
 	xc.registerSessionHandlers()
-	return xc
+	return xc, nil
 }
 
 // RegisterGlobalRequestHandler registers a handler for a global request type.

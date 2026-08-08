@@ -25,6 +25,9 @@ type Server struct {
 
 // NewServer creates a new Server
 func NewServer(c Config) (*Server, error) {
+	if err := validateHandlerConflicts(c); err != nil {
+		return nil, err
+	}
 	if c.HandshakeTimeout == 0 {
 		c.HandshakeTimeout = DefaultHandshakeTimeout
 	}
@@ -67,7 +70,7 @@ func NewServer(c Config) (*Server, error) {
 	}
 
 	// Register built-in channel handler for sessions
-	xc.ChannelHandlers["session"] = func(conn xssh.Conn, ch ssh.NewChannel) error {
+	xc.ChannelHandlers[xssh.SessionChannelType] = func(conn xssh.Conn, ch ssh.NewChannel) error {
 		return conn.HandleSessionChannel(ch)
 	}
 
@@ -77,29 +80,19 @@ func NewServer(c Config) (*Server, error) {
 	if c.SFTP {
 		s.infof("SFTP enabled")
 	}
-	// Merge custom handlers from config (fail on clash with built-in)
+	// Handler conflicts were validated before any setup with side effects.
+	// Copy custom maps so xssh's per-connection registration and the caller's
+	// maps remain independent.
 	for name, h := range c.GlobalRequestHandlers {
-		if _, exists := xc.GlobalRequestHandlers[name]; exists {
-			return nil, fmt.Errorf("global request handler %q already registered", name)
-		}
 		xc.GlobalRequestHandlers[name] = h
 	}
 	for name, h := range c.ChannelHandlers {
-		if _, exists := xc.ChannelHandlers[name]; exists {
-			return nil, fmt.Errorf("channel handler %q already registered", name)
-		}
 		xc.ChannelHandlers[name] = h
 	}
 	for name, h := range c.SessionRequestHandlers {
-		if _, exists := xc.SessionRequestHandlers[name]; exists {
-			return nil, fmt.Errorf("session request handler %q already registered", name)
-		}
 		xc.SessionRequestHandlers[name] = h
 	}
 	for name, h := range c.SubsystemHandlers {
-		if _, exists := xc.SubsystemHandlers[name]; exists {
-			return nil, fmt.Errorf("subsystem handler %q already registered", name)
-		}
 		xc.SubsystemHandlers[name] = h
 	}
 

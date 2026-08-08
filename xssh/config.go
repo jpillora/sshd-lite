@@ -13,6 +13,22 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// Built-in SSH handler names. Keeping these names next to Config and using
+// them at each registration site lets higher-level servers validate custom
+// handlers against the behavior NewConn will enable.
+const (
+	SessionChannelType            = "session"
+	DirectTCPIPChannelType        = "direct-tcpip"
+	PTYRequestType                = "pty-req"
+	WindowChangeRequestType       = "window-change"
+	EnvRequestType                = "env"
+	ShellRequestType              = "shell"
+	ExecRequestType               = "exec"
+	SFTPSubsystem                 = "sftp"
+	TCPIPForwardRequestType       = "tcpip-forward"
+	CancelTCPIPForwardRequestType = "cancel-tcpip-forward"
+)
+
 // Config is the configuration for an xssh.Conn.
 // It provides handlers for global requests, channels, and session requests.
 type Config struct {

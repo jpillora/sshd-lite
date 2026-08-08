@@ -42,7 +42,13 @@ func (s *Server) handleConn(ctx context.Context, tcpConn net.Conn) {
 	}
 
 	// Wrap the connection in an xssh.Conn and serve
-	conn := xssh.NewConn(sshConn, chans, reqs, s.xsshConfig)
+	conn, err := xssh.NewConnChecked(sshConn, chans, reqs, s.xsshConfig)
+	if err != nil {
+		// NewServer validates this immutable internal configuration before
+		// serving, so reaching this branch indicates an internal bug.
+		s.errorf("Invalid internal xssh configuration: %s", err)
+		return
+	}
 	conn.Serve()
 }
 

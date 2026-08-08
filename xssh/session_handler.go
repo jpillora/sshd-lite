@@ -28,11 +28,11 @@ func (c *xconn) registerSessionHandlers() {
 			c.config.Shell = path
 		}
 	}
-	c.sessionRequestHandlers["pty-req"] = handlePtyReq
-	c.sessionRequestHandlers["window-change"] = handleWindowChange
-	c.sessionRequestHandlers["env"] = handleEnv
-	c.sessionRequestHandlers["shell"] = handleShell
-	c.sessionRequestHandlers["exec"] = handleExec
+	c.sessionRequestHandlers[PTYRequestType] = handlePtyReq
+	c.sessionRequestHandlers[WindowChangeRequestType] = handleWindowChange
+	c.sessionRequestHandlers[EnvRequestType] = handleEnv
+	c.sessionRequestHandlers[ShellRequestType] = handleShell
+	c.sessionRequestHandlers[ExecRequestType] = handleExec
 }
 
 // session logging helpers
