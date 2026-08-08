@@ -15,6 +15,10 @@ jobs:
     permissions:
       contents: read
     strategy:
+      # Report every platform. With the default fail-fast, the first platform to
+      # fail cancels the others, which hides platform-specific breakage behind
+      # whichever job happened to fail first.
+      fail-fast: false
       matrix:
         platform: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.platform }}

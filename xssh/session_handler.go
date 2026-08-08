@@ -238,6 +238,11 @@ func attachShell(sess *Session) error {
 	shell.Env = sess.Env
 	debugf(sess, "Session env: %v", sess.Env)
 
+	// closeFunc only ends the shell; the process-death task below is the single
+	// owner of shell.Process.Wait. Reaping from both is unsafe: os.Process
+	// supports one Wait at a time, and on platforms without pidfd the losing
+	// caller blocks in wait4 forever, which would stall session and server
+	// shutdown because both wait for this session's tasks.
 	closeFunc := func() {
 		sess.Channel.Close()
 		if shell.Process != nil {
@@ -249,9 +254,6 @@ func attachShell(sess *Session) error {
 			killErr := shell.Process.Kill()
 			if killErr != nil && !strings.Contains(killErr.Error(), "process already finished") && !strings.Contains(killErr.Error(), "already exited") && !strings.Contains(killErr.Error(), "not supported") {
 				errorf(sess, "Failed to kill shell: %s", killErr)
-			}
-			if _, waitErr := shell.Process.Wait(); waitErr != nil {
-				debugf(sess, "Process wait error: %s", waitErr)
 			}
 		}
 		debugf(sess, "Session closed")
@@ -336,7 +338,8 @@ func attachShell(sess *Session) error {
 
 	sess.goTask(func() {
 		// Start proactively listening for process death, for those ptys that
-		// don't signal on EOF.
+		// don't signal on EOF. This is the only Wait on shell.Process, so it is
+		// also what reaps the shell after closeFunc kills it.
 		if shell.Process != nil {
 			_, err := shell.Process.Wait()
 			if err != nil {
