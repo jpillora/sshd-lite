@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/jpillora/opts"
 	"github.com/jpillora/sshd-lite/sshd"
@@ -55,7 +56,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	err = s.StartContext(ctx)

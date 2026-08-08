@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -17,8 +18,9 @@ import (
 type Conn interface {
 	ssh.Conn
 
-	// Serve starts handling global requests and channels.
-	// This method blocks until the connection is closed.
+	// Serve starts handling global requests and channels. It blocks until the
+	// connection and its owned handler work finish. An overlapping call returns
+	// immediately; a later sequential call is allowed.
 	Serve()
 
 	// HandleSessionChannel handles the "session" channel type.
@@ -44,6 +46,11 @@ type xconn struct {
 	channelHandlers        map[string]ChannelHandler
 	sessionRequestHandlers map[string]SessionRequestHandler
 	subsystemHandlers      map[string]SubsystemHandler
+
+	routineMu         sync.Mutex
+	serveActive       bool
+	acceptingRoutines bool
+	routines          sync.WaitGroup
 }
 
 // NewConn creates a new xssh.Conn from an established SSH connection.
@@ -161,23 +168,72 @@ func (c *xconn) Wait() error {
 	return c.inner.Wait()
 }
 
-// Serve starts handling global requests and channels.
-// This method blocks until the connection is closed.
-// Call this in a goroutine if you need to do other work.
+// Serve starts handling global requests and channels. It blocks until the
+// connection closes and all connection-owned handler work finishes. An
+// overlapping Serve call returns immediately; a later sequential call is
+// allowed, though the connection's request and channel streams are normally
+// already exhausted. Call Serve in a goroutine if you need to do other work.
 func (c *xconn) Serve() {
-	if c.tcpForwardingHandler != nil {
-		defer func() {
-			if err := c.tcpForwardingHandler.closeAll(); err != nil {
-				c.errorf("Failed to clean up TCP forwarding: %s", err)
-			}
-		}()
+	c.routineMu.Lock()
+	if c.serveActive {
+		c.routineMu.Unlock()
+		return
 	}
+	c.serveActive = true
+	c.acceptingRoutines = true
+	// Keep the count non-zero until every source of new internal routines has
+	// stopped. Children may therefore register their own children safely.
+	c.routines.Add(1)
+	c.routineMu.Unlock()
 
 	// Handle global requests
-	go c.handleGlobalRequests()
+	c.goRoutine(c.handleGlobalRequests)
 
 	// Handle channels (blocks until channel is closed)
 	c.handleChannels()
+
+	// Forwarding transports must close before waiting because their copy and
+	// accept routines are part of the connection lifecycle.
+	if c.tcpForwardingHandler != nil {
+		if err := c.tcpForwardingHandler.closeAll(); err != nil {
+			c.errorf("Failed to clean up TCP forwarding: %s", err)
+		}
+	}
+
+	c.routineMu.Lock()
+	c.acceptingRoutines = false
+	c.routineMu.Unlock()
+	c.routines.Done()
+	c.routines.Wait()
+
+	// Keep serveActive set until Wait returns. This prevents another Serve
+	// invocation from adding a new anchor to this WaitGroup while it drains.
+	c.routineMu.Lock()
+	c.serveActive = false
+	c.routineMu.Unlock()
+}
+
+func (c *xconn) goRoutine(fn func()) bool {
+	c.routineMu.Lock()
+	if !c.acceptingRoutines {
+		c.routineMu.Unlock()
+		return false
+	}
+	c.routines.Add(1)
+	c.routineMu.Unlock()
+	go func() {
+		defer c.routines.Done()
+		fn()
+	}()
+	return true
+}
+
+func goConnRoutine(conn Conn, fn func()) bool {
+	if c, ok := conn.(*xconn); ok {
+		return c.goRoutine(fn)
+	}
+	go fn()
+	return true
 }
 
 // handleGlobalRequests dispatches global requests to registered handlers
@@ -210,7 +266,9 @@ func (c *xconn) handleGlobalRequests() {
 // handleChannels dispatches incoming channels to registered handlers
 func (c *xconn) handleChannels() {
 	for newChannel := range c.channels {
-		go c.handleChannel(newChannel)
+		if !c.goRoutine(func() { c.handleChannel(newChannel) }) {
+			_ = newChannel.Reject(ssh.ConnectionFailed, "connection is closing")
+		}
 	}
 }
 
@@ -259,7 +317,15 @@ func (c *xconn) HandleSessionChannel(newChannel ssh.NewChannel) error {
 		Resizes: make(chan []byte, 1),
 		Logger:  c.config.Logger,
 	}
-	go c.handleSessionRequests(sess, requests)
+	sess.startTasks()
+	if !c.goRoutine(func() {
+		c.handleSessionRequests(sess, requests)
+		sess.waitTasks()
+	}) {
+		sess.closeDone()
+		sess.waitTasks()
+		_ = channel.Close()
+	}
 	return nil
 }
 
@@ -272,7 +338,7 @@ func (c *xconn) handleSessionRequests(sess *Session, requests <-chan *ssh.Reques
 	if ka := c.config.KeepAlive; ka > 0 {
 		ticking := make(chan bool, 1)
 		interval := time.Duration(ka) * time.Second
-		go c.keepAlive(sess.Channel, interval, ticking)
+		sess.goTask(func() { c.keepAlive(sess.Channel, interval, ticking) })
 		defer close(ticking)
 	}
 

@@ -200,8 +200,17 @@ func handleExec(sess *Session, req *Request) error {
 	command := string(req.Payload[4:])
 	debugf(sess, "exec command: %s", command)
 
-	// Execute the command
-	go executeCommand(sess, command)
+	// A command can fail and close its channel immediately. Acknowledge the
+	// request before starting it so exit-status and channel-close packets cannot
+	// overtake the request reply and surface as EOF from ssh.Session.Start.
+	if req.WantReply {
+		if err := req.Reply(true, nil); err != nil {
+			return fmt.Errorf("failed to accept exec request: %w", err)
+		}
+	}
+
+	// Execute the command.
+	sess.goTask(func() { executeCommand(sess, command) })
 	return nil
 }
 
@@ -271,7 +280,7 @@ func attachShell(sess *Session) error {
 	ptyClosed := false
 
 	// dequeue resizes
-	go func() {
+	sess.goTask(func() {
 		for payload := range sess.Resizes {
 			ws, err := parseDims(payload)
 			if err != nil {
@@ -299,28 +308,28 @@ func attachShell(sess *Session) error {
 				errorf(sess, "SetWinsize failed: %s", err)
 			}
 		}
-	}()
+	})
 
 	// pipe session to shell and visa-versa
 	var once sync.Once
-	go func() {
+	sess.goTask(func() {
 		_, err := io.Copy(sess.Channel, shellf)
 		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
 			debugf(sess, "Shell to connection copy error: %s", err)
 		}
 		once.Do(closeFunc)
-	}()
-	go func() {
+	})
+	sess.goTask(func() {
 		_, err := io.Copy(shellf, sess.Channel)
 		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
 			debugf(sess, "Connection to shell copy error: %s", err)
 		}
 		once.Do(closeFunc)
-	}()
+	})
 
 	debugf(sess, "Shell attached")
 
-	go func() {
+	sess.goTask(func() {
 		// Start proactively listening for process death, for those ptys that
 		// don't signal on EOF.
 		if shell.Process != nil {
@@ -342,7 +351,7 @@ func attachShell(sess *Session) error {
 		}
 		debugf(sess, "Shell terminated")
 		once.Do(closeFunc)
-	}()
+	})
 
 	return nil
 }
@@ -378,7 +387,7 @@ func executeCommand(sess *Session, command string) {
 		return
 	}
 
-	go copyCommandStdin(sess, stdin)
+	sess.goTask(func() { copyCommandStdin(sess, stdin) })
 
 	err, lifecycleErr := waitCommand(cmd, sess.Done())
 	if lifecycleErr != nil && !processAlreadyDone(lifecycleErr) {

@@ -88,7 +88,10 @@ func (h *TCPForwardingHandler) HandleTCPIPForward(conn Conn, req *Request) error
 	conn.debugf("Reverse forwarding established on %s", actualBindAddr)
 
 	// Start accepting connections
-	go h.acceptReverseConnections(forwardListener, conn)
+	if !goConnRoutine(conn, func() { h.acceptReverseConnections(forwardListener, conn) }) {
+		h.removeListener(actualBindAddr, forwardListener)
+		return errors.Join(errors.New("SSH connection is closing"), closeListener(listener))
+	}
 	return nil
 }
 
@@ -155,25 +158,36 @@ func (h *TCPForwardingHandler) HandleDirectTCPIP(conn Conn, newChannel ssh.NewCh
 		}
 		return fmt.Errorf("failed to connect to %s: %w", destAddr, err)
 	}
+	trackedConn, ok := h.trackConnection(tcpConn)
+	if !ok {
+		tcpConn.Close()
+		return fmt.Errorf("TCP forwarding handler is closed")
+	}
 
 	// Accept the channel
 	channel, reqs, err := newChannel.Accept()
 	if err != nil {
+		h.untrackConnection(trackedConn)
 		tcpConn.Close()
 		return fmt.Errorf("failed to accept direct-tcpip channel: %w", err)
 	}
 
 	// Discard any requests on this channel
-	go ssh.DiscardRequests(reqs)
+	goConnRoutine(conn, func() { ssh.DiscardRequests(reqs) })
 
 	conn.debugf("Direct TCP forwarding established to %s", destAddr)
 
 	// Pipe data between the SSH channel and TCP connection
-	go func() {
+	if !goConnRoutine(conn, func() {
+		defer h.untrackConnection(trackedConn)
 		defer channel.Close()
 		defer tcpConn.Close()
 		pipeConnections(conn, channel, tcpConn)
-	}()
+	}) {
+		h.untrackConnection(trackedConn)
+		_ = channel.Close()
+		_ = tcpConn.Close()
+	}
 
 	return nil
 }
@@ -205,7 +219,11 @@ func (h *TCPForwardingHandler) acceptReverseConnections(forwardListener *tcpForw
 			return
 		}
 		conn.debugf("Accepted reverse forwarding connection from %s", tcpConn.RemoteAddr())
-		go h.handleReverseConnection(trackedConn, conn, forwardListener.host, forwardListener.port)
+		if !goConnRoutine(conn, func() { h.handleReverseConnection(trackedConn, conn, forwardListener.host, forwardListener.port) }) {
+			h.untrackConnection(trackedConn)
+			_ = tcpConn.Close()
+			return
+		}
 	}
 }
 
@@ -242,7 +260,7 @@ func (h *TCPForwardingHandler) handleReverseConnection(trackedConn *reverseTCPCo
 	defer channel.Close()
 
 	// Discard any requests on this channel
-	go ssh.DiscardRequests(reqs)
+	goConnRoutine(conn, func() { ssh.DiscardRequests(reqs) })
 
 	// Pipe data between the TCP connection and SSH channel
 	conn.debugf("Piping data for reverse forwarding connection")

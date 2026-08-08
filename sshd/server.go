@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/jpillora/jplog"
 	"github.com/jpillora/sshd-lite/xssh"
@@ -152,29 +153,153 @@ func (s *Server) StartWith(l net.Listener) error {
 // The server will close when the context is cancelled.
 // Ignores the Host and Port in the config.
 func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
-	defer l.Close()
-	// Accept all connections
+	run := newServerRun(l)
+	if ctx.Err() != nil {
+		run.shutdown()
+		return nil
+	}
+
 	s.infof("Listening on %s...", l.Addr())
-	// Close listener when context is cancelled
-	go func() {
-		<-ctx.Done()
-		s.infof("Closing server")
-		l.Close()
-	}()
+	run.watch(ctx, func() { s.infof("Closing server") })
+
+	var acceptErr error
+	var cancelled bool
 	for {
 		tcpConn, err := l.Accept()
 		if err != nil {
-			return fmt.Errorf("accept failed: %w", err)
+			acceptErr = err
+			cancelled = ctx.Err() != nil
+			break
+		}
+		tracked, ok := run.track(tcpConn)
+		if !ok {
+			// Cancellation may win immediately after Accept returns. The run is
+			// already shutting down, so this transport cannot be handed off.
+			_ = tcpConn.Close()
+			cancelled = true
+			break
 		}
 		if !s.acquireHandshake() {
 			s.debugf("Rejecting connection from %s: too many pending SSH handshakes", tcpConn.RemoteAddr())
-			if err := tcpConn.Close(); err != nil {
+			if err := tracked.Close(); err != nil {
 				s.debugf("Failed to close rejected connection from %s: %s", tcpConn.RemoteAddr(), err)
 			}
+			run.untrack(tracked)
 			continue
 		}
-		go s.handleConn(tcpConn)
+		go func() {
+			defer run.untrack(tracked)
+			s.handleConn(ctx, tracked)
+		}()
 	}
+
+	run.stopWatching()
+	run.shutdown()
+	run.wait()
+	if cancelled {
+		return nil
+	}
+	if acceptErr == nil {
+		// The only error-free way out of the loop is track rejecting an
+		// accepted connection because shutdown had already started.
+		return nil
+	}
+	return fmt.Errorf("accept failed: %w", acceptErr)
+}
+
+// serverRun owns only resources accepted by one StartWithContext invocation.
+// Keeping this state off Server makes concurrent invocations and HandleConn
+// independent: stopping one listener cannot close another run's transports.
+type serverRun struct {
+	listener net.Listener
+
+	mu        sync.Mutex
+	closing   bool
+	conns     map[*trackedServerConn]struct{}
+	connWG    sync.WaitGroup
+	closeOnce sync.Once
+
+	watchStop chan struct{}
+	watchDone chan struct{}
+}
+
+type trackedServerConn struct {
+	net.Conn
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (c *trackedServerConn) Close() error {
+	c.closeOnce.Do(func() { c.closeErr = c.Conn.Close() })
+	return c.closeErr
+}
+
+func newServerRun(listener net.Listener) *serverRun {
+	return &serverRun{
+		listener:  listener,
+		conns:     make(map[*trackedServerConn]struct{}),
+		watchStop: make(chan struct{}),
+		watchDone: make(chan struct{}),
+	}
+}
+
+func (r *serverRun) watch(ctx context.Context, onCancel func()) {
+	go func() {
+		defer close(r.watchDone)
+		select {
+		case <-ctx.Done():
+			onCancel()
+			r.shutdown()
+		case <-r.watchStop:
+		}
+	}()
+}
+
+func (r *serverRun) stopWatching() {
+	close(r.watchStop)
+	<-r.watchDone
+}
+
+func (r *serverRun) track(conn net.Conn) (*trackedServerConn, bool) {
+	tracked := &trackedServerConn{Conn: conn}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closing {
+		return nil, false
+	}
+	r.conns[tracked] = struct{}{}
+	r.connWG.Add(1)
+	return tracked, true
+}
+
+func (r *serverRun) untrack(conn *trackedServerConn) {
+	r.mu.Lock()
+	delete(r.conns, conn)
+	r.mu.Unlock()
+	r.connWG.Done()
+}
+
+func (r *serverRun) shutdown() {
+	r.closeOnce.Do(func() {
+		r.mu.Lock()
+		r.closing = true
+		connections := make([]*trackedServerConn, 0, len(r.conns))
+		for tracked := range r.conns {
+			connections = append(connections, tracked)
+		}
+		r.mu.Unlock()
+
+		// Close may wake code that needs the lifecycle mutex, so never invoke
+		// user-supplied Listener or Conn implementations while holding it.
+		_ = r.listener.Close()
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	})
+}
+
+func (r *serverRun) wait() {
+	r.connWG.Wait()
 }
 
 func (s *Server) acquireHandshake() bool {

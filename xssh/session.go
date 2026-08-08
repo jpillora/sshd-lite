@@ -10,9 +10,10 @@ import (
 // Session represents an active SSH session with its associated state.
 // A session is created when a "session" channel is accepted.
 type Session struct {
-	conn Conn
-	done chan struct{}
-	stop sync.Once
+	conn  Conn
+	done  chan struct{}
+	stop  sync.Once
+	tasks sync.WaitGroup
 	// Channel is the underlying SSH "session" channel.
 	Channel ssh.Channel
 	// Env contains environment variables for this session.
@@ -44,6 +45,23 @@ func (s *Session) closeDone() {
 	if s.done != nil {
 		s.stop.Do(func() { close(s.done) })
 	}
+}
+
+func (s *Session) startTasks() {
+	s.tasks.Add(1)
+}
+
+func (s *Session) goTask(fn func()) {
+	s.tasks.Add(1)
+	go func() {
+		defer s.tasks.Done()
+		fn()
+	}()
+}
+
+func (s *Session) waitTasks() {
+	s.tasks.Done()
+	s.tasks.Wait()
 }
 
 // Conn returns the connection this session belongs to.

@@ -45,12 +45,16 @@ type Config struct {
 	Logger   *slog.Logger    `opts:"-"`
 	AuthKeys []ssh.PublicKey `opts:"-"`
 	// ConnectionHandler is called when a new SSH connection is established.
-	// The context is cancelled when the connection closes.
-	ConnectionHandler      func(context.Context, *ssh.ServerConn) `opts:"-"`
-	GlobalRequestHandlers  map[string]xssh.GlobalRequestHandler   `opts:"-"`
-	ChannelHandlers        map[string]xssh.ChannelHandler         `opts:"-"`
-	SessionRequestHandlers map[string]xssh.SessionRequestHandler  `opts:"-"`
-	SubsystemHandlers      map[string]xssh.SubsystemHandler       `opts:"-"`
+	// The context is cancelled when the connection closes. The handler runs
+	// asynchronously and is not awaited during server shutdown.
+	ConnectionHandler func(context.Context, *ssh.ServerConn) `opts:"-"`
+	// Protocol handlers are synchronous connection-owned work. Server shutdown
+	// waits for them, so they must return promptly when their connection,
+	// session, or channel closes.
+	GlobalRequestHandlers  map[string]xssh.GlobalRequestHandler  `opts:"-"`
+	ChannelHandlers        map[string]xssh.ChannelHandler        `opts:"-"`
+	SessionRequestHandlers map[string]xssh.SessionRequestHandler `opts:"-"`
+	SubsystemHandlers      map[string]xssh.SubsystemHandler      `opts:"-"`
 }
 
 // Session is an alias for xssh.Session for backwards compatibility

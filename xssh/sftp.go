@@ -25,7 +25,7 @@ func NewSFTPHandler(cfg SFTPConfig) SubsystemHandler {
 		if cfg.Logger != nil {
 			cfg.Logger.Debug("SFTP subsystem request accepted")
 		}
-		go startSFTPServer(sess, cfg)
+		sess.goTask(func() { startSFTPServer(sess, cfg) })
 		return nil
 	}
 }
@@ -56,12 +56,12 @@ func startSFTPServer(sess *Session, cfg SFTPConfig) {
 	if cfg.Logger != nil {
 		pr, pw := io.Pipe()
 		defer pw.Close()
-		go func() {
+		sess.goTask(func() {
 			scanner := bufio.NewScanner(pr)
 			for scanner.Scan() {
 				cfg.Logger.Debug(scanner.Text())
 			}
-		}()
+		})
 		opts = append(opts, sftp.WithDebug(pw))
 	}
 	exitStatus := uint32(0)

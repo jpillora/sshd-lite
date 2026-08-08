@@ -19,10 +19,10 @@ func (s *Server) HandleConn(tcpConn net.Conn) {
 		}
 		return
 	}
-	s.handleConn(tcpConn)
+	s.handleConn(context.Background(), tcpConn)
 }
 
-func (s *Server) handleConn(tcpConn net.Conn) {
+func (s *Server) handleConn(ctx context.Context, tcpConn net.Conn) {
 	sshConn, chans, reqs, ok := s.admittedHandshake(tcpConn)
 	if !ok {
 		return
@@ -33,12 +33,12 @@ func (s *Server) handleConn(tcpConn net.Conn) {
 
 	// Call connection handler if configured
 	if h := s.config.ConnectionHandler; h != nil {
-		ctx, cancel := context.WithCancel(context.Background())
-		go h(ctx, sshConn)
-		go func() {
-			sshConn.Wait()
-			cancel()
-		}()
+		handlerCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		// ConnectionHandler is advisory user code. Its context is cancelled
+		// before this method returns, but it is not awaited so an uncooperative
+		// callback cannot prevent transport shutdown.
+		go h(handlerCtx, sshConn)
 	}
 
 	// Wrap the connection in an xssh.Conn and serve

@@ -28,7 +28,9 @@ type Config struct {
 	Shell string
 	// Session enables the built-in session handling (shell, exec, PTY).
 	Session bool
-	// Handlers for different SSH protocol elements
+	// Handlers run synchronously as connection-owned work. Serve waits for them
+	// to return, so they must stop promptly when their Conn, Session, or channel
+	// is closed.
 	GlobalRequestHandlers  map[string]GlobalRequestHandler
 	ChannelHandlers        map[string]ChannelHandler
 	SessionRequestHandlers map[string]SessionRequestHandler
@@ -44,19 +46,27 @@ type Config struct {
 // GlobalRequestHandler handles global (connection-level) SSH requests.
 // Return an error to reject the request; return nil to accept.
 // Call req.Reply() to send a custom reply; otherwise auto-reply is sent.
+// The handler runs synchronously in connection-owned work and must return
+// promptly when conn closes; Conn.Serve waits for it during shutdown.
 type GlobalRequestHandler func(conn Conn, req *Request) error
 
 // ChannelHandler handles new SSH channel requests.
 // Return an error to reject the channel; return nil to accept.
+// The handler runs synchronously in connection-owned work and must return
+// promptly when conn or the accepted channel closes; Conn.Serve waits for it.
 type ChannelHandler func(conn Conn, ch ssh.NewChannel) error
 
 // SessionRequestHandler handles requests within an SSH session.
 // Return an error to reject the request; return nil to accept.
 // Call req.Reply() to send a custom reply; otherwise auto-reply is sent.
+// The handler runs synchronously in session-owned work and must return promptly
+// when the Session closes; Conn.Serve waits for it during shutdown.
 type SessionRequestHandler func(sess *Session, req *Request) error
 
 // SubsystemHandler handles subsystem requests (e.g., sftp).
 // Return an error to reject the request; return nil to accept.
+// The handler runs synchronously in session-owned work and must return promptly
+// when the Session closes; Conn.Serve waits for it during shutdown.
 type SubsystemHandler func(sess *Session, req *Request) error
 
 // ShellPath returns the full path to a shell executable.

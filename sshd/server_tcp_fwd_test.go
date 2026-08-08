@@ -1,6 +1,7 @@
 package sshd_test
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -186,9 +187,7 @@ func TestTCPForwardingDynamicPortCancellationAndImmediateRebind(t *testing.T) {
 		t.Fatalf("connect SSH client: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := client.Close(); err != nil {
-			t.Errorf("close SSH client: %v", err)
-		}
+		cleanupSSHClient(t, client, "SSH client")
 	})
 
 	forward, err := client.Listen("tcp", "127.0.0.1:0")
@@ -216,9 +215,7 @@ func TestTCPForwardingSuccessReplyPayload(t *testing.T) {
 		t.Fatalf("connect SSH client: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := client.Close(); err != nil {
-			t.Errorf("close SSH client: %v", err)
-		}
+		cleanupSSHClient(t, client, "SSH client")
 	})
 
 	host := "127.0.0.1"
@@ -308,9 +305,7 @@ func TestTCPForwardingRejectsDuplicateRequest(t *testing.T) {
 		t.Fatalf("connect SSH client: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := client.Close(); err != nil {
-			t.Errorf("close SSH client: %v", err)
-		}
+		cleanupSSHClient(t, client, "SSH client")
 	})
 
 	forward, err := client.Listen("tcp", "127.0.0.1:0")
@@ -353,9 +348,7 @@ func TestTCPForwardingCleanupIsPerConnection(t *testing.T) {
 		t.Fatalf("connect second SSH client: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := client2.Close(); err != nil {
-			t.Errorf("close second SSH client: %v", err)
-		}
+		cleanupSSHClient(t, client2, "second SSH client")
 	})
 
 	forward1, err := client1.Listen("tcp", "127.0.0.1:0")
@@ -412,6 +405,13 @@ func startTCPForwardingServer(t *testing.T) sshtest.Server {
 		}
 	})
 	return server
+}
+
+func cleanupSSHClient(t *testing.T, client *ssh.Client, description string) {
+	t.Helper()
+	if err := client.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Errorf("close %s: %v", description, err)
+	}
 }
 
 func waitForTCPRebind(t *testing.T, addr string) net.Listener {
