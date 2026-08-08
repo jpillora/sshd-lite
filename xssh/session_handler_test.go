@@ -120,7 +120,11 @@ func TestHandlePtyReqValidation(t *testing.T) {
 		{name: "overflow style term length", payload: maliciousTermLength, wantErr: "malformed pty-req"},
 		{name: "overflow style modes length", payload: maliciousModesLength, wantErr: "malformed pty-req"},
 		{name: "incomplete terminal mode", payload: marshalPtyRequest(80, 24, []byte{ssh.ECHO, 0, 0}), wantErr: "incomplete uint32"},
-		{name: "missing terminal mode end", payload: marshalPtyRequest(80, 24, []byte{ssh.ECHO, 0, 0, 0, 1}), wantErr: "missing TTY_OP_END"},
+		// libssh2 sends an empty modes string when its caller supplies no modes,
+		// and OpenSSH's parser also stops at the end of the buffer. Requiring
+		// TTY_OP_END here would reject pty-req from those clients.
+		{name: "empty terminal modes", payload: marshalPtyRequest(80, 24, nil), wantResize: true},
+		{name: "terminal modes without end", payload: marshalPtyRequest(80, 24, []byte{ssh.ECHO, 0, 0, 0, 1}), wantResize: true},
 		{name: "terminal mode trailing data", payload: marshalPtyRequest(80, 24, []byte{0, 1}), wantErr: "trailing bytes"},
 		{name: "outer trailing data", payload: append(append([]byte(nil), valid...), 1), wantErr: "malformed pty-req"},
 		{name: "oversized dimensions", payload: oversized, wantErr: "out of range"},

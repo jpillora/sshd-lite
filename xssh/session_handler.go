@@ -112,6 +112,11 @@ func parseWindowChange(payload []byte) (*Winsize, error) {
 // 1-159 carry one uint32 argument. Opcode 0 terminates the stream. Opcodes
 // 160-255 are undefined and cause parsing to stop, including when bytes remain
 // in the modes string because their extension framing is unknown to us.
+//
+// An exhausted stream also ends parsing. TTY_OP_END is not required, because
+// clients built on libssh2 send an empty modes string when the caller supplies
+// no modes, and OpenSSH's own parser stops at the end of the buffer too.
+// Rejecting those would fail pty-req for interoperable clients.
 func validateTerminalModes(modes []byte) error {
 	for len(modes) > 0 {
 		opcode := modes[0]
@@ -131,7 +136,7 @@ func validateTerminalModes(modes []byte) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("missing TTY_OP_END")
+	return nil
 }
 
 // queueResize gives resize traffic latest-value semantics. A slow PTY resize
