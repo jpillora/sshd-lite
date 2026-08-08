@@ -386,7 +386,9 @@ func executeCommand(sess *Session, command string) {
 		_ = stdin.Close()
 		action := "failed to start command"
 		if cmd.Dir != "" {
-			action = fmt.Sprintf("failed to start command in %q", cmd.Dir)
+			// Single quotes keep a Windows working directory readable; %q would
+			// escape every path separator in the message sent to the client.
+			action = fmt.Sprintf("failed to start command in '%s'", cmd.Dir)
 		}
 		commandSetupFailed(sess, action, err)
 		return

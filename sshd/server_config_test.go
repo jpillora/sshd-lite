@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -207,6 +208,42 @@ func TestPasswordAuthenticationLogsDoNotExposeCredentials(t *testing.T) {
 	}
 }
 
+// TestAuthErrorsKeepWindowsPathsReadable keeps the Windows rendering reachable
+// from every platform: a real drive-qualified path only reaches these messages
+// when the tests run on Windows, so the literal path is spelled out here. The
+// operator must see the path they configured, and the log assertions in these
+// tests must match the escaping the handler applies on top of it.
+func TestAuthErrorsKeepWindowsPathsReadable(t *testing.T) {
+	const winPath = `C:\ProgramData\ssh\authorized_keys`
+
+	s := &Server{config: Config{AuthType: winPath}}
+	_, err := s.loadAuthTypeFile()
+	if err == nil {
+		t.Fatal("loadAuthTypeFile succeeded for a path that cannot exist here")
+	}
+	if !strings.Contains(err.Error(), winPath) {
+		t.Fatalf("error %q does not carry the configured path verbatim", err)
+	}
+	// %q would render C:\\ProgramData\\ssh\\authorized_keys, which is not the
+	// path the operator configured. The wrapped os error contributes only single
+	// separators, so a doubled one can only come from this package's formatting.
+	if strings.Contains(err.Error(), `\\`) {
+		t.Fatalf("error escaped the configured path separators: %q", err)
+	}
+
+	// loggedPath must model the handler's escaping of that same path, which is
+	// what the reload assertions above rely on.
+	var logs bytes.Buffer
+	slog.New(slog.NewTextHandler(&logs, nil)).
+		Error("Failed to reload authorized keys: parse authorized keys file '" + winPath + "': no keys found")
+	if got := logs.String(); !strings.Contains(got, loggedPath(winPath)) {
+		t.Fatalf("log %q does not contain the escaped path %q", got, loggedPath(winPath))
+	}
+	if strings.Contains(logs.String(), winPath) {
+		t.Fatal("handler stopped escaping separators; loggedPath is no longer needed")
+	}
+}
+
 func TestFileAuthReloadFailsClosedAndRecovers(t *testing.T) {
 	keyA := publicKeyFromSeed(t, "file-auth-a")
 	keyB := publicKeyFromSeed(t, "file-auth-b")
@@ -259,7 +296,7 @@ func TestFileAuthReloadFailsClosedAndRecovers(t *testing.T) {
 
 	logOutput := logs.String()
 	if !strings.Contains(logOutput, "Failed to reload authorized keys") ||
-		!strings.Contains(logOutput, path) {
+		!strings.Contains(logOutput, loggedPath(path)) {
 		t.Fatalf("reload failure log lacks useful context: %s", logOutput)
 	}
 	if strings.Contains(logOutput, "malformed authorized key data") {
@@ -512,6 +549,13 @@ func replaceAuthFile(t *testing.T, path string, contents []byte) {
 	if err := os.Rename(tempPath, path); err != nil {
 		t.Fatalf("install authorized keys replacement: %v", err)
 	}
+}
+
+// loggedPath renders a path as it appears inside a log record. The handler
+// quotes any message containing spaces, which escapes the separators in a
+// Windows path, so the raw path is not a substring of the emitted line.
+func loggedPath(path string) string {
+	return strings.Trim(strconv.Quote(path), `"`)
 }
 
 func requireFileAuth(t *testing.T, callback func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error), publicKey ssh.PublicKey, wantAllowed bool) {

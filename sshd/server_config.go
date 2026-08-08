@@ -131,22 +131,26 @@ func hasWindowsDriveLetter(auth string) bool {
 	return ('a' <= drive && drive <= 'z') || ('A' <= drive && drive <= 'Z')
 }
 
+// Paths are delimited with single quotes rather than %q. A Windows path such as
+// C:\keys\authorized_keys survives verbatim that way, so the operator sees the
+// path they configured; %q would escape every separator. This also matches how
+// the wrapped os errors in these messages render the same path.
 func (s *Server) loadAuthTypeFile() (key.Map, error) {
 	file, err := os.Open(s.config.AuthType)
 	if err != nil {
-		return nil, fmt.Errorf("read authorized keys file %q: %w", s.config.AuthType, err)
+		return nil, fmt.Errorf("read authorized keys file '%s': %w", s.config.AuthType, err)
 	}
 	defer file.Close()
 	b, err := io.ReadAll(io.LimitReader(file, maxAuthorizedKeysFileSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("read authorized keys file %q: %w", s.config.AuthType, err)
+		return nil, fmt.Errorf("read authorized keys file '%s': %w", s.config.AuthType, err)
 	}
 	if len(b) > maxAuthorizedKeysFileSize {
-		return nil, fmt.Errorf("read authorized keys file %q: exceeds %d-byte limit", s.config.AuthType, maxAuthorizedKeysFileSize)
+		return nil, fmt.Errorf("read authorized keys file '%s': exceeds %d-byte limit", s.config.AuthType, maxAuthorizedKeysFileSize)
 	}
 	keys, err := key.ParseKeys(b)
 	if err != nil {
-		return nil, fmt.Errorf("parse authorized keys file %q: %w", s.config.AuthType, err)
+		return nil, fmt.Errorf("parse authorized keys file '%s': %w", s.config.AuthType, err)
 	}
 	return keys, nil
 }
