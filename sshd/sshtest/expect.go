@@ -23,7 +23,7 @@ func ExpectOutput(contains string) scenario.Expectation {
 func (e *expectOutputAction) Check(ctx context.Context, env interface{}, clientName string) error {
 	environ := env.(*Environment)
 	// Check session output if available
-	sess := environ.sessions[clientName]
+	sess, result := environ.outputState(clientName)
 	if sess != nil {
 		output := sess.Output()
 		if strings.Contains(output, e.contains) {
@@ -33,8 +33,8 @@ func (e *expectOutputAction) Check(ctx context.Context, env interface{}, clientN
 	}
 
 	// Check last exec result
-	if environ.lastExecResult != nil {
-		combined := environ.lastExecResult.Stdout + environ.lastExecResult.Stderr
+	if result != nil {
+		combined := result.Stdout + result.Stderr
 		if strings.Contains(combined, e.contains) {
 			return nil
 		}
@@ -67,7 +67,7 @@ func (e *expectOutputMatchAction) Check(ctx context.Context, env interface{}, cl
 
 	environ := env.(*Environment)
 	// Check session output if available
-	sess := environ.sessions[clientName]
+	sess, result := environ.outputState(clientName)
 	if sess != nil {
 		output := sess.Output()
 		if e.regex.MatchString(output) {
@@ -77,8 +77,8 @@ func (e *expectOutputMatchAction) Check(ctx context.Context, env interface{}, cl
 	}
 
 	// Check last exec result
-	if environ.lastExecResult != nil {
-		combined := environ.lastExecResult.Stdout + environ.lastExecResult.Stderr
+	if result != nil {
+		combined := result.Stdout + result.Stderr
 		if e.regex.MatchString(combined) {
 			return nil
 		}
@@ -104,11 +104,12 @@ func ExpectExitCode(code int) scenario.Expectation {
 
 func (e *expectExitCodeAction) Check(ctx context.Context, env interface{}, clientName string) error {
 	environ := env.(*Environment)
-	if environ.lastExecResult == nil {
+	result, ok := environ.execResult()
+	if !ok {
 		return fmt.Errorf("no exec result available")
 	}
-	if environ.lastExecResult.ExitCode != e.code {
-		return fmt.Errorf("expected exit code %d, got %d", e.code, environ.lastExecResult.ExitCode)
+	if result.ExitCode != e.code {
+		return fmt.Errorf("expected exit code %d, got %d", e.code, result.ExitCode)
 	}
 	return nil
 }
@@ -179,7 +180,7 @@ func ExpectConnected() scenario.Expectation {
 
 func (e *expectConnectedAction) Check(ctx context.Context, env interface{}, clientName string) error {
 	environ := env.(*Environment)
-	client := environ.clients[clientName]
+	client := environ.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
 	}
@@ -203,7 +204,7 @@ func ExpectDisconnected() scenario.Expectation {
 
 func (e *expectDisconnectedAction) Check(ctx context.Context, env interface{}, clientName string) error {
 	environ := env.(*Environment)
-	client := environ.clients[clientName]
+	client := environ.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
 	}
@@ -229,13 +230,14 @@ func ExpectStdout(contains string) scenario.Expectation {
 
 func (e *expectStdoutAction) Check(ctx context.Context, env interface{}, clientName string) error {
 	environ := env.(*Environment)
-	if environ.lastExecResult == nil {
+	result, ok := environ.execResult()
+	if !ok {
 		return fmt.Errorf("no exec result available")
 	}
-	if strings.Contains(environ.lastExecResult.Stdout, e.contains) {
+	if strings.Contains(result.Stdout, e.contains) {
 		return nil
 	}
-	return fmt.Errorf("stdout %q does not contain %q", truncate(environ.lastExecResult.Stdout, 200), e.contains)
+	return fmt.Errorf("stdout %q does not contain %q", truncate(result.Stdout, 200), e.contains)
 }
 
 func (e *expectStdoutAction) String() string {
@@ -254,13 +256,14 @@ func ExpectStderr(contains string) scenario.Expectation {
 
 func (e *expectStderrAction) Check(ctx context.Context, env interface{}, clientName string) error {
 	environ := env.(*Environment)
-	if environ.lastExecResult == nil {
+	result, ok := environ.execResult()
+	if !ok {
 		return fmt.Errorf("no exec result available")
 	}
-	if strings.Contains(environ.lastExecResult.Stderr, e.contains) {
+	if strings.Contains(result.Stderr, e.contains) {
 		return nil
 	}
-	return fmt.Errorf("stderr %q does not contain %q", truncate(environ.lastExecResult.Stderr, 200), e.contains)
+	return fmt.Errorf("stderr %q does not contain %q", truncate(result.Stderr, 200), e.contains)
 }
 
 func (e *expectStderrAction) String() string {
@@ -279,7 +282,7 @@ func ExpectScreen(contains string) scenario.Expectation {
 
 func (e *expectScreenAction) Check(ctx context.Context, env interface{}, clientName string) error {
 	environ := env.(*Environment)
-	sess := environ.sessions[clientName]
+	sess := environ.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
 	}
@@ -307,7 +310,7 @@ func ExpectWaitForOutput(contains string, timeout time.Duration) scenario.Expect
 
 func (e *expectWaitForOutputAction) Check(ctx context.Context, env interface{}, clientName string) error {
 	environ := env.(*Environment)
-	sess := environ.sessions[clientName]
+	sess := environ.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
 	}

@@ -2,6 +2,7 @@ package sshtest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,7 +19,7 @@ func Connect() scenario.Action {
 
 func (a *connectAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	client := e.clients[clientName]
+	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
 	}
@@ -39,7 +40,7 @@ func Disconnect() scenario.Action {
 
 func (a *disconnectAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	client := e.clients[clientName]
+	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
 	}
@@ -68,7 +69,7 @@ func ExecWithResult(cmd string, result **ExecResult) scenario.Action {
 
 func (a *execAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	client := e.clients[clientName]
+	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
 	}
@@ -80,7 +81,9 @@ func (a *execAction) Execute(ctx context.Context, env interface{}, clientName st
 		*a.result = result
 	}
 	// Store result in context for expectations
-	e.lastExecResult = result
+	if !e.storeExecResult(result) {
+		return fmt.Errorf("environment stopped while publishing exec result for client %q", clientName)
+	}
 	return nil
 }
 
@@ -105,7 +108,7 @@ func StartShellWithSession(session *Session) scenario.Action {
 
 func (a *shellAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	client := e.clients[clientName]
+	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
 	}
@@ -117,7 +120,10 @@ func (a *shellAction) Execute(ctx context.Context, env interface{}, clientName s
 		*a.session = sess
 	}
 	// Store session in environment for other actions
-	e.sessions[clientName] = sess
+	if !e.storeSession(clientName, sess) {
+		_ = sess.Close()
+		return fmt.Errorf("environment stopped while starting shell for client %q", clientName)
+	}
 	return nil
 }
 
@@ -135,11 +141,10 @@ func CloseShell() scenario.Action {
 
 func (a *closeShellAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	sess := e.sessions[clientName]
+	sess := e.takeSession(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
 	}
-	delete(e.sessions, clientName)
 	return sess.Close()
 }
 
@@ -159,7 +164,7 @@ func SendInput(text string) scenario.Action {
 
 func (a *sendInputAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	sess := e.sessions[clientName]
+	sess := e.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
 	}
@@ -183,7 +188,7 @@ func SendKey(key scenario.Key) scenario.Action {
 
 func (a *sendKeyAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	sess := e.sessions[clientName]
+	sess := e.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
 	}
@@ -207,7 +212,7 @@ func SendLine(text string) scenario.Action {
 
 func (a *sendLineAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	sess := e.sessions[clientName]
+	sess := e.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
 	}
@@ -232,7 +237,7 @@ func ResizePTY(cols, rows uint32) scenario.Action {
 
 func (a *resizePTYAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	sess := e.sessions[clientName]
+	sess := e.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
 	}
@@ -316,8 +321,12 @@ func SFTPUpload(localPath, remotePath string) scenario.Action {
 }
 
 func (a *sftpUploadAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	// TODO: Implement SFTP upload
-	return fmt.Errorf("SFTP upload not yet implemented")
+	return executeSFTPOperation(ctx, env, clientName, "upload", func(client *SFTPClient) error {
+		if err := client.Upload(a.localPath, a.remotePath); err != nil {
+			return fmt.Errorf("upload local path %q to remote path %q: %w", a.localPath, a.remotePath, err)
+		}
+		return nil
+	})
 }
 
 func (a *sftpUploadAction) String() string {
@@ -336,12 +345,68 @@ func SFTPDownload(remotePath, localPath string) scenario.Action {
 }
 
 func (a *sftpDownloadAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	// TODO: Implement SFTP download
-	return fmt.Errorf("SFTP download not yet implemented")
+	return executeSFTPOperation(ctx, env, clientName, "download", func(client *SFTPClient) error {
+		if err := client.Download(a.remotePath, a.localPath); err != nil {
+			return fmt.Errorf("download remote path %q to local path %q: %w", a.remotePath, a.localPath, err)
+		}
+		return nil
+	})
 }
 
 func (a *sftpDownloadAction) String() string {
 	return fmt.Sprintf("SFTPDownload(%q, %q)", a.remotePath, a.localPath)
+}
+
+func executeSFTPOperation(ctx context.Context, rawEnv interface{}, clientName, operation string, fn func(*SFTPClient) error) error {
+	e, ok := rawEnv.(*Environment)
+	if !ok || e == nil {
+		return fmt.Errorf("SFTP %s: invalid test environment %T", operation, rawEnv)
+	}
+	client := e.clientByName(clientName)
+	if client == nil {
+		return fmt.Errorf("client %q not found", clientName)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("SFTP %s canceled before session start: %w", operation, err)
+	}
+
+	sftpClient, err := client.SFTP()
+	if err != nil {
+		return fmt.Errorf("start SFTP session for %s: %w", operation, err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- fn(sftpClient) }()
+
+	select {
+	case err := <-done:
+		if closeErr := sftpClient.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close SFTP session after %s: %w", operation, closeErr))
+		}
+		return err
+	case <-ctx.Done():
+	}
+
+	// pkg/sftp Close interrupts outstanding requests. Close synchronously, then
+	// join the one operation goroutine: the action never abandons goroutines it
+	// owns. Real controlled-transfer tests enforce the practical time bound.
+	closeErr := sftpClient.Close()
+	operationErr := <-done
+	// The operation may have committed its result immediately before Close won
+	// the lifecycle lock. In that case completion, not cancellation, is the
+	// observable outcome even if this select happened to receive ctx.Done.
+	if operationErr == nil {
+		if closeErr != nil {
+			return fmt.Errorf("close completed SFTP %s session: %w", operation, closeErr)
+		}
+		return nil
+	}
+	if operationErr != nil {
+		operationErr = fmt.Errorf("SFTP %s stopped after cancellation: %w", operation, operationErr)
+	}
+	if closeErr != nil {
+		closeErr = fmt.Errorf("close canceled SFTP %s session: %w", operation, closeErr)
+	}
+	return errors.Join(fmt.Errorf("SFTP %s canceled: %w", operation, ctx.Err()), operationErr, closeErr)
 }
 
 // localForwardAction creates a local port forward.
@@ -357,7 +422,7 @@ func LocalForward(localAddr, remoteAddr string) scenario.Action {
 
 func (a *localForwardAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	client := e.clients[clientName]
+	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
 	}
@@ -366,10 +431,10 @@ func (a *localForwardAction) Execute(ctx context.Context, env interface{}, clien
 		return err
 	}
 	// Store listener for cleanup
-	if e.forwardListeners == nil {
-		e.forwardListeners = make(map[string][]interface{})
+	if !e.storeForwardListener(clientName, listener) {
+		_ = listener.Close()
+		return fmt.Errorf("environment stopped while creating local forward for client %q", clientName)
 	}
-	e.forwardListeners[clientName] = append(e.forwardListeners[clientName], listener)
 	return nil
 }
 
@@ -390,7 +455,7 @@ func RemoteForward(remoteAddr, localAddr string) scenario.Action {
 
 func (a *remoteForwardAction) Execute(ctx context.Context, env interface{}, clientName string) error {
 	e := env.(*Environment)
-	client := e.clients[clientName]
+	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
 	}

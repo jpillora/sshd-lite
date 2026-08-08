@@ -9,7 +9,8 @@ steps:
       - shell
       - input: "echo partial"
       - key: Enter
-      - sleep: 200ms
     expect:
-      - output: "partial"
+      - wait_for_output:
+          text: "partial"
+          timeout: 5s
       - event: pty.requested

@@ -1,15 +1,19 @@
 package sshtest
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/jpillora/sshd-lite/sshd/key"
 	"github.com/jpillora/sshd-lite/sshd/sshtest/scenario"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -36,7 +40,8 @@ type Client interface {
 	// LocalForward creates a local port forward.
 	LocalForward(localAddr, remoteAddr string) (net.Listener, error)
 
-	// RemoteForward creates a remote port forward.
+	// RemoteForward creates a remote port forward. The server-side listener is
+	// owned by the client and is closed by Client.Close.
 	RemoteForward(remoteAddr, localAddr string) error
 
 	// Events returns the event bus.
@@ -69,9 +74,149 @@ type ExecResult struct {
 	ExitCode int
 }
 
-// SFTPClient wraps SFTP operations (placeholder for now).
+// SFTPClient owns one SFTP subsystem session. Upload and Download may be used
+// concurrently (the underlying pkg/sftp client supports concurrent requests).
+// Callers ordinarily close it after operations finish. Close atomically prevents
+// a pending Download from replacing its destination, then closes the underlying
+// session to interrupt in-flight requests. A Download already committing its
+// rename wins that race and completes normally. Upload cancellation can leave a
+// partial remote file. Close is idempotent and returns the first close result.
 type SFTPClient struct {
-	client *clientGo
+	client      *sftp.Client
+	lifecycleMu sync.Mutex
+	closed      bool
+	closeOnce   sync.Once
+	closeErr    error
+}
+
+// Upload copies localPath to remotePath, creating or truncating the remote file.
+func (c *SFTPClient) Upload(localPath, remotePath string) (retErr error) {
+	if err := c.ensureOpen(); err != nil {
+		return fmt.Errorf("start upload: %w", err)
+	}
+	local, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open local upload file %q: %w", localPath, err)
+	}
+	defer func() {
+		if err := local.Close(); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close local upload file %q: %w", localPath, err))
+		}
+	}()
+
+	remote, err := c.client.OpenFile(remotePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+	if err != nil {
+		return fmt.Errorf("open remote upload file %q: %w", remotePath, err)
+	}
+	defer func() {
+		if err := remote.Close(); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close remote upload file %q: %w", remotePath, err))
+		}
+	}()
+
+	if _, err := io.Copy(remote, local); err != nil {
+		return fmt.Errorf("copy local file %q to remote file %q: %w", localPath, remotePath, err)
+	}
+	return nil
+}
+
+// Download copies remotePath to localPath. Data is first written to a temporary
+// sibling and atomically renamed where supported, so a failed transfer is never
+// exposed at localPath as a successful complete download.
+func (c *SFTPClient) Download(remotePath, localPath string) (retErr error) {
+	if err := c.ensureOpen(); err != nil {
+		return fmt.Errorf("start download: %w", err)
+	}
+	remote, err := c.client.Open(remotePath)
+	if err != nil {
+		return fmt.Errorf("open remote download file %q: %w", remotePath, err)
+	}
+	remoteClosed := false
+	defer func() {
+		if !remoteClosed {
+			if err := remote.Close(); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("close remote download file %q: %w", remotePath, err))
+			}
+		}
+	}()
+
+	dir := filepath.Dir(localPath)
+	temp, err := os.CreateTemp(dir, "."+filepath.Base(localPath)+".part-*")
+	if err != nil {
+		return fmt.Errorf("create temporary local download file for %q: %w", localPath, err)
+	}
+	tempPath := temp.Name()
+	keepTemp := false
+	tempClosed := false
+	defer func() {
+		if !tempClosed {
+			if err := temp.Close(); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("close temporary local download file %q: %w", tempPath, err))
+			}
+		}
+		if !keepTemp {
+			if err := os.Remove(tempPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				retErr = errors.Join(retErr, fmt.Errorf("remove partial local download file %q: %w", tempPath, err))
+			}
+		}
+	}()
+
+	if _, err := io.Copy(temp, remote); err != nil {
+		return fmt.Errorf("copy remote file %q to local file %q: %w", remotePath, localPath, err)
+	}
+	err = temp.Close()
+	tempClosed = true
+	if err != nil {
+		return fmt.Errorf("close completed local download file %q: %w", tempPath, err)
+	}
+	err = remote.Close()
+	remoteClosed = true
+	if err != nil {
+		return fmt.Errorf("close completed remote download file %q: %w", remotePath, err)
+	}
+	// Close and the destination commit have one explicit winner. Do not hold
+	// lifecycleMu while doing protocol I/O: pkg/sftp Close may need those
+	// requests to unwind.
+	c.lifecycleMu.Lock()
+	if c.closed {
+		c.lifecycleMu.Unlock()
+		return fmt.Errorf("commit local download file %q: SFTP session closed", localPath)
+	}
+	err = replaceFile(tempPath, localPath)
+	if err == nil {
+		keepTemp = true
+	}
+	c.lifecycleMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("replace local download file %q: %w", localPath, err)
+	}
+	return nil
+}
+
+func (c *SFTPClient) ensureOpen() error {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.closed {
+		return errors.New("SFTP session closed")
+	}
+	return nil
+}
+
+func replaceFile(source, destination string) error {
+	return os.Rename(source, destination)
+}
+
+// Close prevents future download commits and closes this SFTP subsystem
+// session. It is safe to call repeatedly. Close does not hold the lifecycle
+// mutex while pkg/sftp shuts down, so interrupted requests can unwind.
+func (c *SFTPClient) Close() error {
+	c.closeOnce.Do(func() {
+		c.lifecycleMu.Lock()
+		c.closed = true
+		c.lifecycleMu.Unlock()
+		c.closeErr = c.client.Close()
+	})
+	return c.closeErr
 }
 
 // ClientOption configures a client.
@@ -174,6 +319,9 @@ type clientGo struct {
 	mu         sync.Mutex
 	connected  bool
 	serverAddr string
+
+	forwardMu        sync.Mutex
+	forwardListeners map[net.Listener]struct{}
 }
 
 // NewClient creates a new test client.
@@ -184,8 +332,9 @@ func NewClient(serverAddr string, opts ...ClientOption) (Client, error) {
 	}
 
 	c := &clientGo{
-		config:     cfg,
-		serverAddr: serverAddr,
+		config:           cfg,
+		serverAddr:       serverAddr,
+		forwardListeners: make(map[net.Listener]struct{}),
 	}
 
 	// Set up events
@@ -264,15 +413,31 @@ func (c *clientGo) Connect() error {
 func (c *clientGo) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	if !c.connected {
 		return nil
 	}
-
-	err := c.sshClient.Close()
+	client := c.sshClient
 	c.connected = false
+	c.sshClient = nil
+	c.forwardMu.Lock()
+	listeners := make([]net.Listener, 0, len(c.forwardListeners))
+	for listener := range c.forwardListeners {
+		listeners = append(listeners, listener)
+		delete(c.forwardListeners, listener)
+	}
+	c.forwardMu.Unlock()
+
+	var closeErr error
+	for _, listener := range listeners {
+		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close forwarding listener %s: %w", listener.Addr(), err))
+		}
+	}
+	if err := client.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		closeErr = errors.Join(closeErr, err)
+	}
 	c.events.Emit(scenario.EventDisconnected, "client", c.config.name)
-	return err
+	return closeErr
 }
 
 // IsConnected returns true if connected.
@@ -405,10 +570,36 @@ func (c *clientGo) SFTP() (*SFTPClient, error) {
 		c.mu.Unlock()
 		return nil, fmt.Errorf("not connected")
 	}
+	client := c.sshClient
 	c.mu.Unlock()
 
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		return nil, fmt.Errorf("start SFTP subsystem: %w", err)
+	}
 	c.events.Emit(scenario.EventSFTPStarted, "client", c.config.name)
-	return &SFTPClient{client: c}, nil
+	return &SFTPClient{client: sftpClient}, nil
+}
+
+func (c *clientGo) trackForwardListener(listener net.Listener) bool {
+	// Keep connection state and listener registration in one critical section.
+	// Close takes these locks in the same order before snapshotting, so a
+	// listener is either included in that snapshot or rejected after disconnect.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.connected {
+		return false
+	}
+	c.forwardMu.Lock()
+	c.forwardListeners[listener] = struct{}{}
+	c.forwardMu.Unlock()
+	return true
+}
+
+func (c *clientGo) untrackForwardListener(listener net.Listener) {
+	c.forwardMu.Lock()
+	delete(c.forwardListeners, listener)
+	c.forwardMu.Unlock()
 }
 
 // LocalForward creates a local port forward.
@@ -425,10 +616,15 @@ func (c *clientGo) LocalForward(localAddr, remoteAddr string) (net.Listener, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on %s: %w", localAddr, err)
 	}
+	if !c.trackForwardListener(listener) {
+		_ = listener.Close()
+		return nil, fmt.Errorf("connection closed while creating local forward")
+	}
 
 	c.events.Emit(scenario.EventForwardRequested, "client", c.config.name, "type", "local", "local", localAddr, "remote", remoteAddr)
 
 	go func() {
+		defer c.untrackForwardListener(listener)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -462,24 +658,35 @@ func (c *clientGo) LocalForward(localAddr, remoteAddr string) (net.Listener, err
 	return listener, nil
 }
 
-// RemoteForward creates a remote port forward.
+// RemoteForward requests a remote port forward. It returns only setup errors;
+// the client retains ownership of the listener until Client.Close.
 func (c *clientGo) RemoteForward(remoteAddr, localAddr string) error {
+	_, err := c.remoteForwardListener(remoteAddr, localAddr)
+	return err
+}
+
+func (c *clientGo) remoteForwardListener(remoteAddr, localAddr string) (net.Listener, error) {
 	c.mu.Lock()
 	if !c.connected {
 		c.mu.Unlock()
-		return fmt.Errorf("not connected")
+		return nil, fmt.Errorf("not connected")
 	}
 	client := c.sshClient
 	c.mu.Unlock()
 
 	listener, err := client.Listen("tcp", remoteAddr)
 	if err != nil {
-		return fmt.Errorf("failed to request remote forward: %w", err)
+		return nil, fmt.Errorf("failed to request remote forward: %w", err)
+	}
+	if !c.trackForwardListener(listener) {
+		_ = listener.Close()
+		return nil, fmt.Errorf("connection closed while creating remote forward")
 	}
 
 	c.events.Emit(scenario.EventForwardRequested, "client", c.config.name, "type", "remote", "remote", remoteAddr, "local", localAddr)
 
 	go func() {
+		defer c.untrackForwardListener(listener)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -509,7 +716,7 @@ func (c *clientGo) RemoteForward(remoteAddr, localAddr string) error {
 		}
 	}()
 
-	return nil
+	return listener, nil
 }
 
 // sessionGo implements Session.

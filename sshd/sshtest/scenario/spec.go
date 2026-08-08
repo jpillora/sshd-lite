@@ -52,6 +52,14 @@ func RemoteForwardSpec(remote, local string) ActionSpec {
 	return ActionSpec{Type: ActionRemoteForward, Params: map[string]interface{}{"local": local, "remote": remote}}
 }
 
+func SFTPUploadSpec(local, remote string) ActionSpec {
+	return ActionSpec{Type: ActionSFTPUpload, Params: map[string]interface{}{"local": local, "remote": remote}}
+}
+
+func SFTPDownloadSpec(remote, local string) ActionSpec {
+	return ActionSpec{Type: ActionSFTPDownload, Params: map[string]interface{}{"local": local, "remote": remote}}
+}
+
 // Expectation spec constructors
 
 func ConnectedSpec() ExpectationSpec {

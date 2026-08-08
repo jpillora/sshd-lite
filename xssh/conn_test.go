@@ -1,6 +1,7 @@
 package xssh
 
 import (
+	"encoding/binary"
 	"io"
 	"path/filepath"
 	"sync"
@@ -9,6 +10,51 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
+
+func TestHandleSubsystemRequestRejectsMalformedAndUnknownNames(t *testing.T) {
+	called := 0
+	conn := NewConn(nil, nil, nil, &Config{
+		SubsystemHandlers: map[string]SubsystemHandler{
+			SFTPSubsystem: func(*Session, *Request) error {
+				called++
+				return nil
+			},
+		},
+	}).(*xconn)
+	sess := &Session{}
+	tests := []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "missing length", payload: []byte{0, 0, 0}},
+		{name: "short name", payload: append([]byte{0, 0, 0, 5}, []byte("sftp")...)},
+		{name: "trailing bytes", payload: append([]byte{0, 0, 0, 4}, []byte("sftp-extra")...)},
+		{name: "unknown name", payload: marshalSubsystemName("future-subsystem")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if conn.handleSubsystemRequest(sess, WrapRequest(&ssh.Request{Payload: test.payload})) {
+				t.Fatal("malformed or unknown subsystem was accepted")
+			}
+		})
+	}
+	if called != 0 {
+		t.Fatalf("SFTP handler called %d times", called)
+	}
+	if !conn.handleSubsystemRequest(sess, WrapRequest(&ssh.Request{Payload: marshalSubsystemName(SFTPSubsystem)})) {
+		t.Fatal("valid SFTP subsystem was rejected")
+	}
+	if called != 1 {
+		t.Fatalf("SFTP handler called %d times after valid request", called)
+	}
+}
+
+func marshalSubsystemName(name string) []byte {
+	payload := make([]byte, 4+len(name))
+	binary.BigEndian.PutUint32(payload, uint32(len(name)))
+	copy(payload[4:], name)
+	return payload
+}
 
 // TestNewConnDoesNotMutateConfig guards the invariant that makes per-connection
 // defaulting safe: servers hand the same *Config to every NewConn, so resolving

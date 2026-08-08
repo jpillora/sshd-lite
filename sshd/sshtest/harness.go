@@ -13,7 +13,10 @@ package sshtest
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -39,51 +42,75 @@ type Environment struct {
 	// State for actions and expectations
 	sessions         map[string]Session
 	lastExecResult   *ExecResult
-	forwardListeners map[string][]interface{}
+	forwardListeners map[string][]io.Closer
 
-	keySeed string
-	timeout time.Duration
-	started bool
-	mu      sync.Mutex
+	keySeed  string
+	timeout  time.Duration
+	started  bool
+	stopping bool
+	stopped  bool
+	stopDone chan struct{}
+	mu       sync.Mutex
 }
 
 // New creates a new test environment.
 func New(t testing.TB) *Environment {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Environment{
-		t:             t,
-		ctx:           ctx,
-		cancel:        cancel,
-		clients:       make(map[string]Client),
-		clientConfigs: make(map[string][]ClientOption),
-		sessions:      make(map[string]Session),
-		events:        NewEventBus(),
-		logs:          log.NewCapture(),
-		keySeed:       "test",
-		timeout:       30 * time.Second,
+		t:                t,
+		ctx:              ctx,
+		cancel:           cancel,
+		clients:          make(map[string]Client),
+		clientConfigs:    make(map[string][]ClientOption),
+		sessions:         make(map[string]Session),
+		forwardListeners: make(map[string][]io.Closer),
+		events:           NewEventBus(),
+		logs:             log.NewCapture(),
+		keySeed:          "test",
+		timeout:          30 * time.Second,
 	}
 }
 
 // WithServer configures the server with the given options.
 func (e *Environment) WithServer(opts ...ServerOption) *Environment {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.started || e.stopping || e.stopped {
+		e.t.Fatal("cannot configure server after environment lifecycle has started")
+	}
 	e.serverOpts = append(e.serverOpts, opts...)
 	return e
 }
 
 // WithClient adds a client configuration with the given name.
 func (e *Environment) WithClient(name string, opts ...ClientOption) *Environment {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.started || e.stopping || e.stopped {
+		e.t.Fatal("cannot configure clients after environment lifecycle has started")
+	}
 	e.clientConfigs[name] = opts
 	return e
 }
 
 // WithKeySeed sets the base seed for deterministic key generation.
 func (e *Environment) WithKeySeed(seed string) *Environment {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.started || e.stopping || e.stopped {
+		e.t.Fatal("cannot configure key seed after environment lifecycle has started")
+	}
 	e.keySeed = seed
 	return e
 }
 
 // WithTimeout sets the default timeout for operations.
 func (e *Environment) WithTimeout(d time.Duration) *Environment {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.started || e.stopping || e.stopped {
+		e.t.Fatal("cannot configure timeout after environment lifecycle has started")
+	}
 	e.timeout = d
 	return e
 }
@@ -93,13 +120,15 @@ func (e *Environment) Start() *Environment {
 	e.t.Helper()
 
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.started {
-		e.mu.Unlock()
 		e.t.Fatal("environment already started")
 		return e
 	}
-	e.started = true
-	e.mu.Unlock()
+	if e.stopping || e.stopped {
+		e.t.Fatal("environment cannot be started after Stop")
+		return e
+	}
 
 	// Add shared events and logs to server options
 	opts := append([]ServerOption{
@@ -110,10 +139,11 @@ func (e *Environment) Start() *Environment {
 	// Create and start server
 	server, err := NewServer(opts...)
 	if err != nil {
+		e.stopped = true
+		e.cancel()
 		e.t.Fatalf("failed to create server: %v", err)
 		return e
 	}
-	e.server = server
 
 	// Add authorized keys for each client with key-based auth
 	for name, clientOpts := range e.clientConfigs {
@@ -127,6 +157,8 @@ func (e *Environment) Start() *Environment {
 		if cfg.keySeed != "" {
 			pubKey, err := key.PublicKeyFromSeed(cfg.keySeed)
 			if err != nil {
+				e.stopped = true
+				e.cancel()
 				e.t.Fatalf("failed to generate public key for client %s: %v", name, err)
 				return e
 			}
@@ -136,14 +168,14 @@ func (e *Environment) Start() *Environment {
 
 	// Start server
 	if err := server.Start(e.ctx); err != nil {
+		e.stopped = true
+		e.cancel()
 		e.t.Fatalf("failed to start server: %v", err)
 		return e
 	}
 
-	// Give server time to be ready
-	time.Sleep(50 * time.Millisecond)
-
 	// Create clients
+	clients := make(map[string]Client, len(e.clientConfigs))
 	for name, clientOpts := range e.clientConfigs {
 		opts := append([]ClientOption{
 			ClientWithName(name),
@@ -152,12 +184,23 @@ func (e *Environment) Start() *Environment {
 
 		client, err := NewClient(server.Addr(), opts...)
 		if err != nil {
+			for _, created := range clients {
+				_ = created.Close()
+			}
+			_ = server.Stop()
+			e.stopped = true
+			e.cancel()
 			e.t.Fatalf("failed to create client %s: %v", name, err)
 			return e
 		}
-		e.clients[name] = client
+		clients[name] = client
 	}
 
+	// Publish a fully initialized environment in one critical section. Stop and
+	// all accessors either see nothing started or this complete snapshot.
+	e.server = server
+	e.clients = clients
+	e.started = true
 	return e
 }
 
@@ -166,41 +209,170 @@ func (e *Environment) Stop() {
 	e.t.Helper()
 
 	e.mu.Lock()
-	if !e.started {
+	if e.stopping {
+		done := e.stopDone
+		e.mu.Unlock()
+		<-done
+		return
+	}
+	if e.stopped {
 		e.mu.Unlock()
 		return
 	}
+	if !e.started {
+		e.stopped = true
+		e.cancel()
+		e.mu.Unlock()
+		return
+	}
+	e.stopping = true
+	e.stopDone = make(chan struct{})
+	done := e.stopDone
+	sessions := e.sessions
+	e.sessions = make(map[string]Session)
+	e.lastExecResult = nil
+	forwardListeners := e.forwardListeners
+	e.forwardListeners = make(map[string][]io.Closer)
+	clients := make(map[string]Client, len(e.clients))
+	for name, client := range e.clients {
+		clients[name] = client
+	}
+	server := e.server
 	e.mu.Unlock()
 
-	// Close all clients
-	for name, client := range e.clients {
-		if err := client.Close(); err != nil {
+	// Cancel action contexts first, then close resources from the inside out so
+	// blocked session and forwarding operations are interrupted before the SSH
+	// transports and server disappear.
+	if e.cancel != nil {
+		e.cancel()
+	}
+	for name, session := range sessions {
+		if err := session.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			e.t.Logf("warning: failed to close session for client %s: %v", name, err)
+		}
+	}
+	for name, listeners := range forwardListeners {
+		for _, listener := range listeners {
+			if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				e.t.Logf("warning: failed to close forwarding listener for client %s: %v", name, err)
+			}
+		}
+	}
+	for name, client := range clients {
+		if err := client.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			e.t.Logf("warning: failed to close client %s: %v", name, err)
 		}
 	}
 
-	// Stop server
-	if e.server != nil {
-		if err := e.server.Stop(); err != nil {
+	if server != nil {
+		if err := server.Stop(); err != nil && !errors.Is(err, net.ErrClosed) {
 			e.t.Logf("warning: failed to stop server: %v", err)
 		}
 	}
 
-	// Cancel context
-	if e.cancel != nil {
-		e.cancel()
+	e.mu.Lock()
+	e.stopping = false
+	e.stopped = true
+	close(done)
+	e.mu.Unlock()
+}
+
+func (e *Environment) clientByName(name string) Client {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.clients[name]
+}
+
+func (e *Environment) firstClientName() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for name := range e.clients {
+		return name
 	}
+	return ""
+}
+
+func (e *Environment) sessionByName(name string) Session {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.sessions[name]
+}
+
+func (e *Environment) storeExecResult(result *ExecResult) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.started || e.stopping || e.stopped {
+		return false
+	}
+	if result == nil {
+		e.lastExecResult = nil
+		return true
+	}
+	copy := *result
+	e.lastExecResult = &copy
+	return true
+}
+
+func (e *Environment) execResult() (*ExecResult, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lastExecResult == nil {
+		return nil, false
+	}
+	copy := *e.lastExecResult
+	return &copy, true
+}
+
+func (e *Environment) outputState(name string) (Session, *ExecResult) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	result := e.lastExecResult
+	if result != nil {
+		copy := *result
+		result = &copy
+	}
+	return e.sessions[name], result
+}
+
+func (e *Environment) storeSession(name string, session Session) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.started || e.stopping || e.stopped {
+		return false
+	}
+	e.sessions[name] = session
+	return true
+}
+
+func (e *Environment) takeSession(name string) Session {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	session := e.sessions[name]
+	delete(e.sessions, name)
+	return session
+}
+
+func (e *Environment) storeForwardListener(name string, listener io.Closer) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.started || e.stopping || e.stopped {
+		return false
+	}
+	e.forwardListeners[name] = append(e.forwardListeners[name], listener)
+	return true
 }
 
 // Server returns the server instance.
 func (e *Environment) Server() Server {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return e.server
 }
 
 // Client returns a client by name.
 func (e *Environment) Client(name string) Client {
-	client, ok := e.clients[name]
-	if !ok {
+	client := e.clientByName(name)
+	if client == nil {
 		e.t.Fatalf("client %q not found", name)
 		return nil
 	}
@@ -209,7 +381,13 @@ func (e *Environment) Client(name string) Client {
 
 // Clients returns all clients.
 func (e *Environment) Clients() map[string]Client {
-	return e.clients
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	clients := make(map[string]Client, len(e.clients))
+	for name, client := range e.clients {
+		clients[name] = client
+	}
+	return clients
 }
 
 // Events returns the shared event bus.
@@ -224,6 +402,8 @@ func (e *Environment) Logs() *log.Capture {
 
 // Context returns the environment's context.
 func (e *Environment) Context() context.Context {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return e.ctx
 }
 
@@ -235,12 +415,16 @@ func (e *Environment) Run(sc *scenario.Scenario) error {
 		return fmt.Errorf("scenario is nil")
 	}
 
+	e.mu.Lock()
+	ctx := e.ctx
+	timeout := e.timeout
+	e.mu.Unlock()
 	runner := &Runner{
 		env:     e,
-		timeout: e.timeout,
+		timeout: timeout,
 	}
 
-	return runner.Run(e.ctx, sc)
+	return runner.Run(ctx, sc)
 }
 
 // RunYAML parses and executes a YAML scenario.

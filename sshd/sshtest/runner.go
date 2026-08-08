@@ -30,10 +30,7 @@ func (r *Runner) Run(ctx context.Context, sc *scenario.Scenario) error {
 func (r *Runner) runStep(ctx context.Context, scenarioName string, stepNum int, step scenario.Step) error {
 	clientName := step.Client
 	if clientName == "" {
-		for name := range r.env.clients {
-			clientName = name
-			break
-		}
+		clientName = r.env.firstClientName()
 	}
 
 	for _, action := range step.Actions {
@@ -147,6 +144,10 @@ func actionToInterface(as scenario.ActionSpec) (scenario.Action, error) {
 		return LocalForward(as.LocalAddr(), as.RemoteAddr()), nil
 	case scenario.ActionRemoteForward:
 		return RemoteForward(as.RemoteAddr(), as.LocalAddr()), nil
+	case scenario.ActionSFTPUpload:
+		return SFTPUpload(as.LocalPath(), as.RemotePath()), nil
+	case scenario.ActionSFTPDownload:
+		return SFTPDownload(as.RemotePath(), as.LocalPath()), nil
 	default:
 		return nil, fmt.Errorf("unknown action type: %s", as.Type)
 	}

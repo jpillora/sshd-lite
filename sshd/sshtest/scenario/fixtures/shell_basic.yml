@@ -8,7 +8,8 @@ steps:
       - connect
       - shell
       - line: "echo shell-test"
-      - sleep: 200ms
     expect:
-      - output: "shell-test"
+      - wait_for_output:
+          text: "shell-test"
+          timeout: 5s
       - event: shell.started

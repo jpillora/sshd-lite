@@ -65,6 +65,8 @@ const (
 	ActionWaitForEvent  ActionType = "wait_for_event"
 	ActionLocalForward  ActionType = "local_forward"
 	ActionRemoteForward ActionType = "remote_forward"
+	ActionSFTPUpload    ActionType = "sftp_upload"
+	ActionSFTPDownload  ActionType = "sftp_download"
 )
 
 // ExpectationSpec describes an expectation to verify.
@@ -192,6 +194,16 @@ func (a *ActionSpec) RemoteAddr() string {
 		return v
 	}
 	return ""
+}
+
+// LocalPath returns the local filesystem path for SFTP actions.
+func (a *ActionSpec) LocalPath() string {
+	return a.LocalAddr()
+}
+
+// RemotePath returns the remote filesystem path for SFTP actions.
+func (a *ActionSpec) RemotePath() string {
+	return a.RemoteAddr()
 }
 
 // Helper methods for ExpectationSpec params.
