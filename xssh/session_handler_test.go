@@ -16,6 +16,53 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// cmd.exe takes /c where every other supported shell takes -c. Getting this
+// wrong does not fail loudly: cmd.exe treats -c as nothing it recognises and
+// waits on input that never arrives, so exec sessions hang until the client
+// times out rather than reporting an error.
+func TestCommandFlagPerShell(t *testing.T) {
+	tests := []struct {
+		shell string
+		want  string
+	}{
+		{"bash", "-c"},
+		{"/bin/bash", "-c"},
+		{"/usr/bin/fish", "-c"},
+		{"sh", "-c"},
+		{"powershell", "-c"},
+		{`C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe`, "-c"},
+		{"pwsh", "-c"},
+		{`C:\Program Files\PowerShell\7\pwsh.exe`, "-c"},
+		{"cmd", "/c"},
+		{"cmd.exe", "/c"},
+		{`C:\WINDOWS\system32\cmd.exe`, "/c"},
+		{`C:\WINDOWS\SYSTEM32\CMD.EXE`, "/c"},
+	}
+	for _, tt := range tests {
+		if got := commandFlag(tt.shell); got != tt.want {
+			t.Errorf("commandFlag(%q) = %q, want %q", tt.shell, got, tt.want)
+		}
+	}
+}
+
+func TestShellBaseNormalisesPathAndSuffix(t *testing.T) {
+	tests := []struct {
+		shell string
+		want  string
+	}{
+		{"bash", "bash"},
+		{"/bin/bash", "bash"},
+		{`C:\WINDOWS\system32\cmd.exe`, "cmd"},
+		{"CMD.EXE", "cmd"},
+		{`C:\Program Files\Git\bin\bash.exe`, "bash"},
+	}
+	for _, tt := range tests {
+		if got := shellBase(tt.shell); got != tt.want {
+			t.Errorf("shellBase(%q) = %q, want %q", tt.shell, got, tt.want)
+		}
+	}
+}
+
 func TestCommandWaitDelayBoundsInheritedOutput(t *testing.T) {
 	const modeEnv = "SSHD_LITE_WAIT_DELAY_HELPER"
 	const pidFileEnv = "SSHD_LITE_WAIT_DELAY_PID_FILE"

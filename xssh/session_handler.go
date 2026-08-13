@@ -219,11 +219,35 @@ func handleExec(sess *Session, req *Request) error {
 	return nil
 }
 
+// shellBase returns the shell's name without directory or executable suffix,
+// lowercased. Windows shells arrive as paths like C:\WINDOWS\system32\cmd.exe,
+// so comparing the raw basename would miss every one of them. Both separators
+// are honoured on every platform rather than using filepath.Base, which does
+// not treat \ as a separator off Windows.
+func shellBase(shell string) string {
+	if i := strings.LastIndexAny(shell, `/\`); i >= 0 {
+		shell = shell[i+1:]
+	}
+	return strings.TrimSuffix(strings.ToLower(shell), ".exe")
+}
+
+// commandFlag returns the flag that makes shell run a single command string.
+// cmd.exe is the odd one out: it takes /c, where POSIX shells and PowerShell
+// (for which -c abbreviates -Command) all take -c. Passing -c to cmd.exe does
+// not fail loudly — cmd.exe waits for input that never comes, so the session
+// hangs until the client gives up.
+func commandFlag(shell string) string {
+	if shellBase(shell) == "cmd" {
+		return "/c"
+	}
+	return "-c"
+}
+
 // attachShell attaches a shell to the session
 func attachShell(sess *Session) error {
 	cfg := sess.Config()
 	args := []string{}
-	switch filepath.Base(cfg.Shell) {
+	switch shellBase(cfg.Shell) {
 	case "bash", "fish":
 		args = append(args, "-l")
 	}
@@ -408,7 +432,7 @@ func executeCommand(sess *Session, command string) {
 	cfg := sess.Config()
 
 	// Use shell to execute the command
-	cmd := exec.Command(cfg.Shell, "-c", command)
+	cmd := exec.Command(cfg.Shell, commandFlag(cfg.Shell), command)
 	prepareCommand(cmd)
 	if cfg.WorkingDirectory != "" {
 		cmd.Dir = cfg.WorkingDirectory
