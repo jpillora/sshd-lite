@@ -20,10 +20,10 @@ Authenticated SSH names do not select operating-system users. Shells and command
 ### Testing
 
 ```bash
-go test ./...                 # Run all tests in the root module
-go test -race ./...           # Run the root test suite with the race detector
+go test ./...                 # Run all tests
+go test -race ./...           # Run the test suite with the race detector
 go test -v ./sshd ./xssh      # Run the core package tests verbosely
-go vet ./...                  # Vet the root module
+go vet ./...                  # Vet the module
 go generate ./...             # Regenerate README CLI help from main.go
 ```
 
@@ -68,16 +68,20 @@ go run . --tcp-forwarding user:pass   # Enable TCP forwarding
 | `xssh/tcp_fwd.go` | Local and reverse TCP forwarding |
 | `server/compat.go` | Deprecated compatibility aliases for older imports |
 | `sshd/sshtest/` | Integration harness, scenarios, and protocol test support |
-| `winpty/` | Windows PTY compatibility module |
-| `go.work` | Go workspace (main + winpty modules) |
+| `winpty/` | Vendored Windows ConPTY backend |
 
-## Go Workspace
+## Modules
 
-The project uses Go workspaces to manage the `winpty` subdirectory as a separate module:
+The repository is a single Go module. There is no `go.work` and no nested
+`go.mod`: `winpty` is an ordinary package, so `go build`, `go test` and
+`go mod tidy` behave the same here as they do for any consumer.
 
-- `go.work` declares both `.` and `./winpty` as workspace members and currently requires Go 1.26.5.
-- The root module uses `github.com/creack/pty` directly on Unix. `winpty` vendors its Windows ConPTY implementation and has no `replace` directive, so both modules resolve the same `creack/pty` version whether or not the workspace is active.
-- Run `go mod tidy` for the root module. Check the nested module independently with `cd winpty && GOWORK=off go mod tidy`.
+- The root module uses `github.com/creack/pty` on Unix and the vendored
+  `winpty` package on Windows.
+- Do not add a `go.work` or a nested `go.mod` back. `winpty` was a separate
+  module purely to host a `replace` directive; that replace was ignored by every
+  consumer, which made the package impossible to import or `go install`, and the
+  workspace hid the breakage from CI.
 
 ## Common Issues
 
@@ -88,7 +92,7 @@ The project uses Go workspaces to manage the `winpty` subdirectory as a separate
 - **Programmatic keys**: `Config.AuthKeys` is mutually exclusive with `AuthType`; it accepts bare public keys and cannot express `authorized_keys` options, username bindings, or per-key restrictions.
 - **Handshake protection**: Zero `HandshakeTimeout` and `MaxPendingHandshakes` values select the defaults (10 seconds and 64). Negative values disable the corresponding protection.
 - **Handler conflicts**: `sshd.NewServer` rejects custom handler names reserved by enabled built-ins. At the lower level, prefer `xssh.NewConnChecked` when configuration errors must be returned; `xssh.NewConn` panics on conflicts.
-- **Windows PTY**: The `winpty` module vendors its ConPTY implementation (`*_windows.go`, from `photostorm/pty`) instead of depending on that fork. The fork's `go.mod` declares itself as `github.com/creack/pty`, so consuming it needs a `replace`, and a `replace` in a non-main module is ignored — which made `winpty` impossible to import or `go install`. Do not reintroduce the replace. Vetting the Windows build reports four pre-existing `unsafe.Pointer` findings in the vendored files.
+- **Windows PTY**: The `winpty` package vendors its ConPTY implementation (`*_windows.go`, from `photostorm/pty`) instead of depending on that fork. The fork's `go.mod` declares itself as `github.com/creack/pty`, so consuming it needs a `replace`, and a `replace` outside the main module is ignored. Do not reintroduce the replace. Vetting the Windows build reports four pre-existing `unsafe.Pointer` findings in the vendored files.
 - **Port fallback**: With an empty port, the server tries 22 first and falls back to 2200.
 
 # Meads (`md`) Task Tracking Context

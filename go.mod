@@ -7,7 +7,6 @@ tool github.com/jpillora/md-tmpl
 require (
 	github.com/creack/pty v1.1.24
 	github.com/jpillora/jplog v1.0.2
-	github.com/jpillora/sshd-lite/winpty v0.0.0-20260813094037-258c253b395b
 	github.com/pkg/sftp v1.13.11
 	golang.org/x/crypto v0.54.0
 	gopkg.in/yaml.v3 v3.0.1

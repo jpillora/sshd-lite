@@ -140,7 +140,7 @@ jobs:
             ($files | length) > 0 and
             all($files[];
               . as $file |
-              (["go.mod", "go.sum", "go.work.sum", "winpty/go.mod", "winpty/go.sum"] | index($file.filename)) != null and
+              (["go.mod", "go.sum"] | index($file.filename)) != null and
               ($file.status == "modified" or $file.status == "added") and
               ($file | has("previous_filename") | not)
             )

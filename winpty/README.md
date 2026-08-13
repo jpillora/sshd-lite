@@ -13,14 +13,13 @@ The ConPTY implementation is vendored from
 
 The fork's `go.mod` still declares its module path as `github.com/creack/pty`,
 so it can only be depended on through a `replace` directive. Go ignores
-`replace` directives in any module that is not the main module, so that replace
-only ever applied inside this repo's workspace: every external importer, and
-`go install`, resolved the real `creack/pty` — which has no `Pty` or `FdHolder`
-type — and failed to compile.
+`replace` directives outside the main module, so that replace only ever applied
+inside this repo: every external importer, and `go install`, resolved the real
+`creack/pty` — which has no `Pty` or `FdHolder` type — and failed to compile.
 
-Vendoring removes the replace, which makes this module importable and
-installable, and stops the replace from leaking up and silently swapping the
-root module's `creack/pty` on Linux and macOS too.
+Hosting that replace was the only reason this directory was a separate module
+behind a `go.work`. Vendoring removed the replace, so the module split and the
+workspace went with it — this is now an ordinary package in the root module.
 
 It also fixes the version pin in place. Later photostorm releases deleted the
 ConPTY implementation, so the pinned pseudo-version could never be bumped; there
