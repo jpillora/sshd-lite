@@ -95,6 +95,8 @@ $ sshd-lite --help
   --max-pending-handshakes, -m  maximum concurrent unauthenticated SSH handshakes (negative to
                                 disable, default 64)
   --noenv, -n                   ignore environment variables provided by the client
+  --inherit-env, -i             give sessions the server process's own environment (may expose
+                                secrets held by whoever started sshd-lite)
   --verbose, -v                 verbose logs
   --quiet, -q                   no logs
   --sftp, -s                    enable the SFTP subsystem (disabled by default)

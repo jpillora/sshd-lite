@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -329,7 +328,7 @@ func (c *xconn) HandleSessionChannel(newChannel ssh.NewChannel) error {
 		conn:    c,
 		done:    make(chan struct{}),
 		Channel: channel,
-		Env:     os.Environ(),
+		Env:     append(baseEnv(c.config.InheritEnv), connectionEnv(c.RemoteAddr(), c.LocalAddr())...),
 		// Resize events use latest-value semantics. A capacity of one lets the
 		// request dispatcher replace a stale pending size without blocking.
 		Resizes: make(chan []byte, 1),
