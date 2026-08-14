@@ -31,8 +31,9 @@ func TestBaseEnvDoesNotLeakServerEnvironment(t *testing.T) {
 }
 
 func TestBaseEnvKeepsWhatAShellNeeds(t *testing.T) {
-	// PATH is the one variable a session is unusable without, and it is present
-	// on every platform this builds for.
+	// PATH is the one variable a session is unusable without. Windows spells it
+	// Path in baseEnvNames, so the lookup has to be name-case agnostic the same
+	// way the platform is.
 	t.Setenv("PATH", "/usr/bin:/bin")
 
 	env := baseEnv(false)
@@ -40,9 +41,38 @@ func TestBaseEnvKeepsWhatAShellNeeds(t *testing.T) {
 		t.Fatalf("baseEnv dropped PATH: %v", env)
 	}
 	for _, kv := range env {
-		if strings.HasPrefix(kv, "PATH=") && kv != "PATH=/usr/bin:/bin" {
+		if envKeyMatches(kv, "PATH") && kv[len("PATH="):] != "/usr/bin:/bin" {
 			t.Errorf("baseEnv rewrote PATH: got %q", kv)
 		}
+	}
+}
+
+// Windows environment names are case-insensitive, so a client's PATH must
+// replace an inherited Path instead of sitting beside it and leaving the winner
+// to chance.
+func TestAppendEnvHonoursPlatformNameCasing(t *testing.T) {
+	env := appendEnv([]string{"Path=C:\\windows", "HOME=/home/u"}, "PATH=/override")
+	if envNamesCaseInsensitive {
+		if len(env) != 2 {
+			t.Errorf("appendEnv added a duplicate name: %q", env)
+		}
+		if !slices.Contains(env, "PATH=/override") {
+			t.Errorf("appendEnv did not replace Path: %q", env)
+		}
+	} else {
+		if len(env) != 3 {
+			t.Errorf("appendEnv should treat Path and PATH as distinct on unix: %q", env)
+		}
+	}
+	// Exact-name replacement works on every platform.
+	env = appendEnv([]string{"HOME=/home/u"}, "HOME=/root")
+	if !slices.Equal(env, []string{"HOME=/root"}) {
+		t.Errorf("appendEnv() = %q, want [HOME=/root]", env)
+	}
+	// A prefix of another name must not be mistaken for it.
+	env = appendEnv([]string{"HOMEBREW=/opt"}, "HOME=/root")
+	if len(env) != 2 {
+		t.Errorf("appendEnv confused HOME with HOMEBREW: %q", env)
 	}
 }
 

@@ -7,11 +7,27 @@ import (
 	"strings"
 )
 
+// envKeyMatches reports whether an environment entry ("NAME=value") names the
+// given variable. Windows environment names are case-insensitive, so a client
+// sending PATH must replace an inherited Path rather than sit beside it and
+// leave which one wins to chance.
+func envKeyMatches(entry, name string) bool {
+	if len(entry) <= len(name) || entry[len(name)] != '=' {
+		return false
+	}
+	if envNamesCaseInsensitive {
+		return strings.EqualFold(entry[:len(name)], name)
+	}
+	return entry[:len(name)] == name
+}
+
 func appendEnv(env []string, kv string) []string {
-	p := strings.SplitN(kv, "=", 2)
-	k := p[0] + "="
+	name, _, ok := strings.Cut(kv, "=")
+	if !ok {
+		return append(env, kv)
+	}
 	for i, e := range env {
-		if strings.HasPrefix(e, k) {
+		if envKeyMatches(e, name) {
 			env[i] = kv
 			return env
 		}
@@ -20,9 +36,8 @@ func appendEnv(env []string, kv string) []string {
 }
 
 func hasEnv(env []string, key string) bool {
-	k := key + "="
 	for _, e := range env {
-		if strings.HasPrefix(e, k) {
+		if envKeyMatches(e, key) {
 			return true
 		}
 	}
