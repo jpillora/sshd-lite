@@ -50,9 +50,15 @@ func errorf(sess *Session, f string, args ...interface{}) {
 
 // handlePtyReq handles "pty-req" session requests
 func handlePtyReq(sess *Session, req *Request) error {
-	ws, err := parsePtyRequest(req.Payload)
+	term, ws, err := parsePtyRequest(req.Payload)
 	if err != nil {
 		return err
+	}
+	// The terminal type belongs to the client's terminal, not the server's. It
+	// used to be dropped, which left sessions running on whatever TERM the
+	// operator's own shell happened to export.
+	if term != "" {
+		sess.Env = appendEnv(sess.Env, "TERM="+term)
 	}
 	queueResize(sess, ws)
 	debugf(sess, "PTY ready")
@@ -81,19 +87,40 @@ type windowChangePayload struct {
 	PixelWidth, PixelHeight uint32
 }
 
-func parsePtyRequest(payload []byte) (*Winsize, error) {
+func parsePtyRequest(payload []byte) (string, *Winsize, error) {
 	var p ptyRequestPayload
 	if err := ssh.Unmarshal(payload, &p); err != nil {
-		return nil, fmt.Errorf("malformed pty-req payload: %w", err)
+		return "", nil, fmt.Errorf("malformed pty-req payload: %w", err)
 	}
 	if err := validateTerminalModes([]byte(p.Modes)); err != nil {
-		return nil, fmt.Errorf("malformed pty-req terminal modes: %w", err)
+		return "", nil, fmt.Errorf("malformed pty-req terminal modes: %w", err)
 	}
 	ws, err := winsizeFromDimensions(p.Columns, p.Rows)
 	if err != nil {
-		return nil, fmt.Errorf("invalid pty-req dimensions: %w", err)
+		return "", nil, fmt.Errorf("invalid pty-req dimensions: %w", err)
 	}
-	return ws, nil
+	if !validTerm(p.Term) {
+		return "", nil, fmt.Errorf("invalid pty-req terminal type")
+	}
+	return p.Term, ws, nil
+}
+
+// validTerm keeps a client-supplied terminal type to the shape TERM actually
+// takes. It reaches a child process's environment, so it is bounded and
+// restricted to printable ASCII rather than passed through verbatim.
+func validTerm(term string) bool {
+	if len(term) > 64 {
+		return false
+	}
+	for _, r := range term {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.', r == '+':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func parseWindowChange(payload []byte) (*Winsize, error) {
@@ -343,19 +370,31 @@ func attachShell(sess *Session) error {
 
 	// pipe session to shell and visa-versa
 	var once sync.Once
+	// Closed once the shell's output has been fully forwarded. The reaper waits
+	// for this before reporting exit status, so a client cannot receive the
+	// status ahead of the output that produced it.
+	outputDone := make(chan struct{})
 	sess.goTask(func() {
 		_, err := io.Copy(sess.Channel, shellf)
 		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
 			debugf(sess, "Shell to connection copy error: %s", err)
 		}
-		once.Do(closeFunc)
+		// Teardown belongs to the reaper. Closing the channel here raced it and
+		// won, which is why an interactive session never delivered exit-status
+		// and every clean exit surfaced to the client as 255.
+		close(outputDone)
 	})
 	sess.goTask(func() {
 		_, err := io.Copy(shellf, sess.Channel)
 		if err != nil && !strings.Contains(err.Error(), "file already closed") && !strings.Contains(err.Error(), "use of closed connection") {
 			debugf(sess, "Connection to shell copy error: %s", err)
 		}
-		once.Do(closeFunc)
+		// EOF here means the client closed its write side, not that the session
+		// is over — the same distinction copyCommandStdin makes for exec, and
+		// the one Session.Done documents. Tearing the shell down here killed
+		// every session whose client piped input and closed stdin. The shell is
+		// reaped when it exits on its own, or by the Done path below when the
+		// client actually goes away.
 	})
 
 	debugf(sess, "Shell attached")
@@ -382,16 +421,31 @@ func attachShell(sess *Session) error {
 			// been observed on darwin not to return even after the shell was
 			// signalled and killed. A stuck reaper must not be able to hold a
 			// server open, so waiting for it is bounded below.
-			reaped := make(chan error, 1)
+			type reapResult struct {
+				state *os.ProcessState
+				err   error
+			}
+			reaped := make(chan reapResult, 1)
 			go func() {
-				_, err := shell.Process.Wait()
-				reaped <- err
+				state, err := shell.Process.Wait()
+				reaped <- reapResult{state: state, err: err}
 			}()
 
-			var err error
+			var result reapResult
 			timedOut := false
 			select {
-			case err = <-reaped:
+			case result = <-reaped:
+				// The shell exited on its own terms, so the client is still
+				// attached and expects its status. Release the pty first: on
+				// unix the master only reports EOF once this side closes it, so
+				// the output copy would otherwise never finish draining.
+				releasePTY()
+				select {
+				case <-outputDone:
+				case <-time.After(shellOutputFlushTimeout):
+					debugf(sess, "Shell output still draining after %s; reporting exit status anyway", shellOutputFlushTimeout)
+				}
+				sendExitStatus(sess, shellExitCode(result.state))
 			case <-sess.Done():
 				// Make the shell actually go away before bounding the wait:
 				// closeFunc interrupts it and then kills it.
@@ -403,11 +457,12 @@ func attachShell(sess *Session) error {
 				// therefore wait on a shell that only this close can release.
 				releasePTY()
 				select {
-				case err = <-reaped:
+				case result = <-reaped:
 				case <-time.After(shellReapTimeout):
 					timedOut = true
 				}
 			}
+			err := result.err
 			if timedOut {
 				errorf(sess, "Shell did not exit within %s of shutdown; abandoning its reaper", shellReapTimeout)
 			} else if err != nil &&
@@ -484,6 +539,11 @@ const commandWaitDelay = 2 * time.Second
 // that always stops.
 const shellReapTimeout = 5 * time.Second
 
+// shellOutputFlushTimeout bounds how long a reaped shell's exit status waits on
+// its own output to finish forwarding. Reporting late is better than reporting
+// out of order, but a stuck copy must not withhold the status indefinitely.
+const shellOutputFlushTimeout = 2 * time.Second
+
 func prepareCommand(cmd *exec.Cmd) {
 	setCommandProcessGroup(cmd)
 	// os/exec uses internal pipes when stdout/stderr are non-files (including an
@@ -526,6 +586,20 @@ func commandExitCode(err error) uint32 {
 	// Reporting a failure here would make backgrounded work look like an error.
 	if errors.Is(err, exec.ErrWaitDelay) {
 		return 0
+	}
+	return 1
+}
+
+// shellExitCode maps a reaped interactive shell onto the status reported to the
+// client. ExitCode is -1 when the shell was signalled rather than exiting; that
+// only reaches here if something outside this session killed it, since our own
+// teardown path reports nothing at all.
+func shellExitCode(state *os.ProcessState) uint32 {
+	if state == nil {
+		return 1
+	}
+	if code := state.ExitCode(); code >= 0 {
+		return uint32(code)
 	}
 	return 1
 }

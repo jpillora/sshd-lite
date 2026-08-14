@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,6 +62,66 @@ func TestShellBaseNormalisesPathAndSuffix(t *testing.T) {
 			t.Errorf("shellBase(%q) = %q, want %q", tt.shell, got, tt.want)
 		}
 	}
+}
+
+// A pty-req carries the client's terminal type. It used to be parsed and
+// dropped, leaving sessions on whatever TERM the operator's shell exported.
+func TestPtyRequestCarriesClientTerm(t *testing.T) {
+	payload := ssh.Marshal(ptyRequestPayload{Term: "screen-256color", Columns: 80, Rows: 24})
+	term, ws, err := parsePtyRequest(payload)
+	if err != nil {
+		t.Fatalf("parsePtyRequest: %v", err)
+	}
+	if term != "screen-256color" {
+		t.Errorf("term = %q, want screen-256color", term)
+	}
+	if ws == nil || ws.Cols != 80 || ws.Rows != 24 {
+		t.Errorf("winsize = %+v, want 80x24", ws)
+	}
+}
+
+// TERM reaches a child process's environment, so it is validated rather than
+// forwarded verbatim.
+func TestPtyRequestRejectsHostileTerm(t *testing.T) {
+	for _, term := range []string{
+		"xterm\x00injected",
+		"xterm\nLD_PRELOAD=/tmp/evil.so",
+		"xterm=foo",
+		strings.Repeat("x", 65),
+	} {
+		payload := ssh.Marshal(ptyRequestPayload{Term: term, Columns: 80, Rows: 24})
+		if _, _, err := parsePtyRequest(payload); err == nil {
+			t.Errorf("parsePtyRequest accepted hostile term %q", term)
+		}
+	}
+	for _, term := range []string{"", "xterm", "xterm-256color", "screen.linux", "vt100+x"} {
+		payload := ssh.Marshal(ptyRequestPayload{Term: term, Columns: 80, Rows: 24})
+		if _, _, err := parsePtyRequest(payload); err != nil {
+			t.Errorf("parsePtyRequest rejected valid term %q: %v", term, err)
+		}
+	}
+}
+
+func TestShellExitCode(t *testing.T) {
+	// A shell that exits cleanly must report 0, not the 255 a client falls back
+	// to when no exit-status arrives at all.
+	for _, code := range []int{0, 1, 5, 7, 127} {
+		cmd := exec.Command(shellForExitTest(), "-c", fmt.Sprintf("exit %d", code))
+		_ = cmd.Run()
+		if got := shellExitCode(cmd.ProcessState); got != uint32(code) {
+			t.Errorf("shellExitCode(exit %d) = %d, want %d", code, got, code)
+		}
+	}
+	if got := shellExitCode(nil); got != 1 {
+		t.Errorf("shellExitCode(nil) = %d, want 1", got)
+	}
+}
+
+func shellForExitTest() string {
+	if runtime.GOOS == "windows" {
+		return "powershell"
+	}
+	return "/bin/sh"
 }
 
 func TestCommandWaitDelayBoundsInheritedOutput(t *testing.T) {
