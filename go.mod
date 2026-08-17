@@ -8,7 +8,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/jpillora/jplog v1.0.2
 	github.com/pkg/sftp v1.13.11
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.55.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -20,7 +20,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/jpillora/opts v1.6.0
 	github.com/kr/fs v0.1.0 // indirect
-	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
+	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/posener/complete v1.2.3 // indirect
