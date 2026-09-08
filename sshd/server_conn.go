@@ -23,6 +23,10 @@ func (s *Server) HandleConn(tcpConn net.Conn) {
 }
 
 func (s *Server) handleConn(ctx context.Context, tcpConn net.Conn) {
+	s.handleConnConfig(ctx, tcpConn, s.xsshConfig)
+}
+
+func (s *Server) handleConnConfig(ctx context.Context, tcpConn net.Conn, cfg *xssh.Config) {
 	sshConn, chans, reqs, ok := s.admittedHandshake(tcpConn)
 	if !ok {
 		return
@@ -42,7 +46,7 @@ func (s *Server) handleConn(ctx context.Context, tcpConn net.Conn) {
 	}
 
 	// Wrap the connection in an xssh.Conn and serve
-	conn, err := xssh.NewConnChecked(sshConn, chans, reqs, s.xsshConfig)
+	conn, err := xssh.NewConnChecked(sshConn, chans, reqs, cfg)
 	if err != nil {
 		// NewServer validates this immutable internal configuration before
 		// serving, so reaching this branch indicates an internal bug.

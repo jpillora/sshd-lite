@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/jpillora/jplog"
+	"github.com/jpillora/sshd-lite/internal/mosh"
 	"github.com/jpillora/sshd-lite/xssh"
 	"golang.org/x/crypto/ssh"
 )
@@ -59,7 +60,7 @@ func NewServer(c Config) (*Server, error) {
 		IgnoreEnv:              c.IgnoreEnv,
 		NoInheritEnv:           c.NoInheritEnv,
 		NoGlobalEnv:            c.NoGlobalEnv,
-		WorkingDirectory:       c.WorkDir,
+		WorkingDirectory:       s.config.WorkDir,
 		Shell:                  s.config.Shell, // absolute path, resolved once by computeSSHConfig
 		Session:                true,
 		SFTP:                   c.SFTP,
@@ -121,15 +122,15 @@ func (s *Server) StartContext(ctx context.Context) error {
 
 	//listen
 	if p == "" {
-		l, err = net.Listen("tcp", h+":22")
+		l, err = net.Listen("tcp", net.JoinHostPort(h, "22"))
 		if err != nil {
-			l, err = net.Listen("tcp", h+":2200")
+			l, err = net.Listen("tcp", net.JoinHostPort(h, "2200"))
 			if err != nil {
 				return fmt.Errorf("failed to listen on 22 and 2200")
 			}
 		}
 	} else {
-		l, err = net.Listen("tcp", h+":"+p)
+		l, err = net.Listen("tcp", net.JoinHostPort(h, p))
 		if err != nil {
 			return fmt.Errorf("failed to listen on %s", p)
 		}
@@ -154,6 +155,17 @@ func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
 		return nil
 	}
 
+	cfg := s.xsshConfig
+	if s.config.Mosh {
+		udp, err := mosh.Listen(ctx, l.Addr())
+		if err != nil {
+			run.shutdown()
+			return err
+		}
+		defer udp.Close()
+		cfg = s.moshConfig(udp)
+		s.infof("Mosh listening on UDP %s", l.Addr())
+	}
 	s.infof("Listening on %s...", l.Addr())
 	run.watch(ctx, func() { s.infof("Closing server") })
 
@@ -184,7 +196,7 @@ func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
 		}
 		go func() {
 			defer run.untrack(tracked)
-			s.handleConn(ctx, tracked)
+			s.handleConnConfig(ctx, tracked, cfg)
 		}()
 	}
 

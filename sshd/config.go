@@ -41,6 +41,7 @@ type Config struct {
 	LogVerbose           bool `opts:"name=verbose,short=v,help=verbose logs"`
 	LogQuiet             bool `opts:"name=quiet,short=q,help=no logs"`
 	SFTP                 bool `opts:"short=s,help=enable the SFTP subsystem (disabled by default)"`
+	Mosh                 bool `opts:"name=mosh,help=enable Mosh on the same UDP port (five-minute idle timeout)"`
 	TCPForwarding        bool `opts:"name=tcp-forwarding,short=t,help=enable TCP forwarding (both local and reverse; disabled by default)"`
 	// programmatic options
 	KeyBytes []byte       `opts:"-"`

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/jpillora/opts"
+	"github.com/jpillora/sshd-lite/client"
 	"github.com/jpillora/sshd-lite/sshd"
 )
 
@@ -43,6 +44,20 @@ Notes:
 `
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "client" {
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+		c := client.Config{}
+		opts.New(&c).Name("sshd-lite client").Version(version).Parse()
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		code, err := client.Run(ctx, c, os.Stdin, os.Stdout, os.Stderr)
+		cancel()
+		if err != nil {
+			log.Print(err)
+			code = 1
+		}
+		os.Exit(code)
+	}
+
 	c := sshd.Config{
 		Host:                 "0.0.0.0",
 		KeepAlive:            60,

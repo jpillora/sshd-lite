@@ -32,6 +32,8 @@ go install github.com/jpillora/sshd-lite@latest
 * Seed server-key generation
 * Enable SFTP support with `--sftp` (allows `scp` and other SFTP clients)
 * Enable TCP forwarding with `--tcp-forwarding` (both local and reverse forwarding)
+* Built-in SSH client: `sshd-lite client user@host`
+* Mosh terminal sessions over UDP: enable `--mosh` on both server and client
 
 Sessions inherit the server process's environment by default. Set
 `--no-inherit-env` (`Config.NoInheritEnv`) to inherit only essential shell
@@ -68,6 +70,53 @@ john@localhost's password: *** # enter password from above
 bash-3.2$ date
 Wed  9 Dec 2020 23:57:22 AEDT
 ```
+
+### Built-in SSH and Mosh client
+
+```sh
+# Server: TCP and UDP both listen on port 2222
+sshd-lite --mosh --port 2222 user:pass
+
+# SSH shell, or a command with streamed stdin/stdout/stderr and exit status
+sshd-lite client --port 2222 user@host
+sshd-lite client --port 2222 user@host 'uname -a'
+
+# Mosh shell: authenticate over SSH, then communicate over UDP
+sshd-lite client --mosh --port 2222 user@host
+```
+
+The client checks `~/.ssh/known_hosts`; use `--known-hosts` to select another
+file. For a local test with a randomly generated server host key, explicitly
+add `--insecure`. Authentication uses the SSH agent, default Ed25519/RSA keys,
+`--identity`, or a password prompt (`--password` also works).
+
+Mosh uses [mosh-go](https://github.com/unixshells/mosh-go) for authenticated
+encryption, terminal screen updates and UDP retransmission. Open **both TCP
+and UDP** on the chosen port. All sessions share that UDP port, including when
+the server chooses port 2200 as its fallback. Each authenticated SSH request
+issues a fresh 128-bit session key. The SSH connection then closes; changing
+UDP source addresses does not end the shell.
+
+A key expires **five minutes after issuance or the last fresh, authenticated
+UDP packet**, whichever is later. Encrypted UDP keepalives run automatically
+in both directions (at the protocol's adaptive retransmission interval,
+250 ms–10 s). They keep an idle connected terminal alive. A disconnected
+session expires after five minutes; reconnect with a new SSH handshake and
+key after expiry. Replays, invalid packets and server output alone cannot
+extend the timeout. At most 64 pending or active Mosh sessions are allowed.
+
+Mosh starts the same configured shell in the same working directory and uses
+the same environment policy as SSH. Exit the shell normally, or type
+**Ctrl-^ then .** to disconnect. Terminal resizing is supported on Unix;
+Windows retains its initial ConPTY size, matching the existing backend's
+limitation. Mosh is for interactive shells; use the SSH client for commands,
+separate stderr or binary streams.
+
+This integration uses an sshd-lite SSH bootstrap request and an extension for
+exit status. Use the bundled `sshd-lite client --mosh`; the standard `mosh`
+launcher is not supported. No external `mosh-server` executable is required.
+
+Run `sshd-lite client --help` for client options.
 
 ### Usage
 
@@ -109,6 +158,7 @@ $ sshd-lite --help
   --verbose, -v                 verbose logs
   --quiet, -q                   no logs
   --sftp, -s                    enable the SFTP subsystem (disabled by default)
+  --mosh                        enable Mosh on the same UDP port (five-minute idle timeout)
   --tcp-forwarding, -t          enable TCP forwarding (both local and reverse; disabled by default)
   --version                     display version
   --help                        display help
