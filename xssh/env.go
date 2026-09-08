@@ -44,17 +44,10 @@ func hasEnv(env []string, key string) bool {
 	return false
 }
 
-// baseEnv returns the environment a new session starts from.
-//
-// The server process environment is deliberately not inherited by default.
-// sshd-lite runs shells and commands as the user that started it, so
-// inheriting would hand every authenticated client whatever the operator
-// happened to have exported — cloud credentials, API tokens, CI secrets — with
-// no way to opt out. OpenSSH builds a session environment from scratch for the
-// same reason. Config.InheritEnv restores the old behaviour for callers that
-// depend on it.
-func baseEnv(inherit bool) []string {
-	if inherit {
+// baseEnv returns inherited process variables for a new session. Opting out
+// retains the platform-specific variables needed to run a shell.
+func baseEnv(noInherit bool) []string {
+	if !noInherit {
 		return os.Environ()
 	}
 	env := make([]string, 0, len(baseEnvNames))
@@ -66,6 +59,82 @@ func baseEnv(inherit bool) []string {
 		}
 	}
 	return env
+}
+
+// sessionEnv layers inherited variables over system defaults without changing
+// the daemon's own environment. A missing system file is normal.
+func sessionEnv(noInherit, noGlobal bool, path string) ([]string, error) {
+	var env []string
+	var err error
+	if !noGlobal {
+		env, err = readEnvironmentFile(path)
+	}
+	if env == nil {
+		// exec.Cmd treats nil as full inheritance, even when opted out.
+		env = []string{}
+	}
+	for _, kv := range baseEnv(noInherit) {
+		env = appendEnv(env, kv)
+	}
+	return env, err
+}
+
+// readEnvironmentFile reads /etc/environment-style assignments, not a shell
+// script: values are literal, with optional surrounding quotes and comments.
+// Blank lines and malformed assignments are ignored.
+func readEnvironmentFile(path string) ([]string, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var env []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "export ") || strings.HasPrefix(line, "export\t") {
+			line = strings.TrimSpace(line[len("export"):])
+		}
+		name, value, ok := strings.Cut(line, "=")
+		name = strings.TrimSpace(name)
+		if !ok || !validEnvName(name) || strings.ContainsRune(value, 0) {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if len(value) > 0 && (value[0] == '\'' || value[0] == '"') {
+			end := strings.IndexByte(value[1:], value[0])
+			if end < 0 {
+				continue
+			}
+			end++
+			tail := strings.TrimSpace(value[end+1:])
+			if tail != "" && !strings.HasPrefix(tail, "#") {
+				continue
+			}
+			value = value[1:end]
+		} else {
+			value, _, _ = strings.Cut(value, "#")
+			value = strings.TrimSpace(value)
+		}
+		env = appendEnv(env, name+"="+value)
+	}
+	return env, nil
+}
+
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, c := range name {
+		if c != '_' && !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(i > 0 && c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // connectionEnv returns the SSH_CLIENT and SSH_CONNECTION variables OpenSSH

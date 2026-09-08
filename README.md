@@ -33,6 +33,15 @@ go install github.com/jpillora/sshd-lite@latest
 * Enable SFTP support with `--sftp` (allows `scp` and other SFTP clients)
 * Enable TCP forwarding with `--tcp-forwarding` (both local and reverse forwarding)
 
+Sessions inherit the server process's environment by default. Set
+`--no-inherit-env` (`Config.NoInheritEnv`) to inherit only essential shell
+variables. On Unix, `/etc/environment` supplies defaults when present, including
+with inheritance disabled; `--no-global-env` (`Config.NoGlobalEnv`) disables
+loading this file. Inherited process values take precedence. Its
+`KEY=value` entries support quotes and comments, with no shell execution or
+variable expansion. Client environment requests and PTY `TERM` override those
+values; `--noenv` separately ignores client environment requests.
+
 ### Quick use
 
 Server
@@ -95,8 +104,8 @@ $ sshd-lite --help
   --max-pending-handshakes, -m  maximum concurrent unauthenticated SSH handshakes (negative to
                                 disable, default 64)
   --noenv, -n                   ignore environment variables provided by the client
-  --inherit-env, -i             give sessions the server process's own environment (may expose
-                                secrets held by whoever started sshd-lite)
+  --no-inherit-env              inherit only essential shell variables from the server process
+  --no-global-env               do not load /etc/environment for sessions
   --verbose, -v                 verbose logs
   --quiet, -q                   no logs
   --sftp, -s                    enable the SFTP subsystem (disabled by default)
@@ -111,6 +120,9 @@ $ sshd-lite --help
     valid again, and any entry with options makes the entire file invalid
   * authenticated names do not select system users or change privileges; shells
     and commands run as the user that started sshd-lite
+  * sessions inherit the process environment; no-inherit-env limits this to
+    essential shell variables; /etc/environment supplies defaults on Unix
+    unless no-global-env is set
   * remote commands stream stdin, stdout, and stderr and report their exit status
   * shells, commands, and SFTP start in workdir; if unset, it is the process
     working directory when the server is created

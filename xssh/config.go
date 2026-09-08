@@ -37,14 +37,16 @@ type Config struct {
 	// KeepAlive interval in seconds. If > 0, sends periodic ping requests.
 	KeepAlive int
 	// IgnoreEnv if true, ignores environment variables from "env" requests.
-	// It has no bearing on the server's own environment; see InheritEnv.
+	// It has no bearing on the server's own environment; see NoInheritEnv.
 	IgnoreEnv bool
-	// InheritEnv if true, starts every session from the server process's
-	// environment. Off by default: shells and commands run as the user that
-	// started sshd-lite, so inheriting hands each authenticated client whatever
-	// the operator exported, secrets included. When false a session gets only
-	// the variables a shell needs to function.
-	InheritEnv bool
+	// NoInheritEnv disables full process environment inheritance, retaining only
+	// essential shell variables. By default sessions inherit the entire process
+	// environment. Unless NoGlobalEnv is set, /etc/environment supplies Unix defaults;
+	// inherited process values take precedence over those defaults.
+	NoInheritEnv bool
+	// NoGlobalEnv disables loading /etc/environment on Unix. It does not affect
+	// process inheritance or client environment requests. No effect on Windows.
+	NoGlobalEnv bool
 	// WorkingDirectory sets the initial working directory for sessions and sftp.
 	WorkingDirectory string
 	// Shell is the shell executable to use for sessions. Defaults to "bash".

@@ -7,8 +7,7 @@ package xssh
 const envNamesCaseInsensitive = false
 
 // baseEnvNames are the process environment variables a session inherits when
-// Config.InheritEnv is false: what a shell needs to start and find things.
-// Everything else is the operator's business, not the client's.
+// Config.NoInheritEnv is true: what a shell needs to start and find things.
 var baseEnvNames = []string{
 	"HOME",
 	"LANG",
@@ -18,3 +17,6 @@ var baseEnvNames = []string{
 	"TZ",
 	"USER",
 }
+
+// systemEnvFile supplies session defaults when present.
+const systemEnvFile = "/etc/environment"

@@ -3,19 +3,17 @@ package xssh
 import (
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 )
 
-// The server runs shells as whoever started it, so an inherited environment is
-// handed wholesale to every authenticated client. This is the guard against
-// that regressing.
-func TestBaseEnvDoesNotLeakServerEnvironment(t *testing.T) {
+func TestBaseEnvOptOutFiltersProcessEnvironment(t *testing.T) {
 	t.Setenv("SSHD_LITE_TEST_SECRET", "hunter2")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "should-not-escape")
 
-	env := baseEnv(false)
+	env := baseEnv(true)
 	for _, kv := range env {
 		name := strings.SplitN(kv, "=", 2)[0]
 		if !slices.Contains(baseEnvNames, name) {
@@ -36,7 +34,7 @@ func TestBaseEnvKeepsWhatAShellNeeds(t *testing.T) {
 	// way the platform is.
 	t.Setenv("PATH", "/usr/bin:/bin")
 
-	env := baseEnv(false)
+	env := baseEnv(true)
 	if !hasEnv(env, "PATH") {
 		t.Fatalf("baseEnv dropped PATH: %v", env)
 	}
@@ -79,12 +77,138 @@ func TestAppendEnvHonoursPlatformNameCasing(t *testing.T) {
 func TestBaseEnvInheritReturnsProcessEnvironment(t *testing.T) {
 	t.Setenv("SSHD_LITE_TEST_SECRET", "hunter2")
 
-	env := baseEnv(true)
+	env := baseEnv(false)
 	if !hasEnv(env, "SSHD_LITE_TEST_SECRET") {
-		t.Error("baseEnv(true) should return the process environment verbatim")
+		t.Error("baseEnv(false) should return the process environment verbatim")
 	}
 	if len(env) != len(os.Environ()) {
-		t.Errorf("baseEnv(true) returned %d vars, want %d", len(env), len(os.Environ()))
+		t.Errorf("baseEnv(false) returned %d vars, want %d", len(env), len(os.Environ()))
+	}
+}
+
+func TestReadEnvironmentFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "environment")
+	data := `
+# system defaults
+PATH = "/usr/local/bin:/usr/bin"
+SINGLE='hello # world' # comment
+DOUBLE="hello world"
+PLAIN=hello world # comment
+EMPTY=
+export EXPORTED=yes
+EQUALS=a=b
+LITERAL=$HOME:$(echo untouched)` + "`echo untouched`\n" + `
+DUPLICATE=old
+DUPLICATE=new
+INVALID LINE
+=empty-name
+1BAD=value
+BAD NAME=value
+UNTERMINATED="value
+TRAILING="value"junk
+` + "NUL=bad\x00value\n"
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readEnvironmentFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"PATH=/usr/local/bin:/usr/bin", "SINGLE=hello # world", "DOUBLE=hello world",
+		"PLAIN=hello world", "EMPTY=", "EXPORTED=yes", "EQUALS=a=b",
+		"LITERAL=$HOME:$(echo untouched)`echo untouched`", "DUPLICATE=new",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("environment = %q, want %q", got, want)
+	}
+}
+
+func TestSessionEnvironmentPrecedence(t *testing.T) {
+	const name = "SSHD_LITE_TEST_INHERITED"
+	t.Setenv(name, "process")
+	t.Setenv("SSHD_LITE_TEST_EMPTY", "")
+	path := filepath.Join(t.TempDir(), "environment")
+	if err := os.WriteFile(path, []byte(name+"=system\nSSHD_LITE_TEST_SYSTEM_ONLY=system\nSSHD_LITE_TEST_EMPTY=system\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, noInherit := range []bool{false, true} {
+		env, err := sessionEnv(noInherit, false, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := name + "=process"
+		empty := "SSHD_LITE_TEST_EMPTY="
+		if noInherit {
+			want = name + "=system"
+			empty += "system"
+		}
+		for _, kv := range []string{want, empty, "SSHD_LITE_TEST_SYSTEM_ONLY=system"} {
+			if !slices.Contains(env, kv) {
+				t.Errorf("NoInheritEnv=%v: missing %q", noInherit, kv)
+			}
+		}
+		if got := os.Getenv(name); got != "process" {
+			t.Fatalf("session changed process environment to %q", got)
+		}
+	}
+}
+
+func TestSessionEnvironmentMissingOrUnreadableFile(t *testing.T) {
+	t.Setenv("SSHD_LITE_TEST_INHERITED", "process")
+	dir := t.TempDir()
+	for _, path := range []string{"", filepath.Join(dir, "missing"), dir} {
+		env, err := sessionEnv(false, false, path)
+		if (err != nil) != (path == dir) {
+			t.Errorf("sessionEnv(%q) error = %v", path, err)
+		}
+		if !slices.Contains(env, "SSHD_LITE_TEST_INHERITED=process") {
+			t.Errorf("sessionEnv(%q) lost inherited variable", path)
+		}
+	}
+}
+
+func TestSessionEnvironmentNoGlobalEnv(t *testing.T) {
+	t.Setenv("SSHD_LITE_TEST_INHERITED", "process")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "environment")
+	if err := os.WriteFile(path, []byte("SSHD_LITE_TEST_GLOBAL=system\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, noInherit := range []bool{false, true} {
+		for _, noGlobal := range []bool{false, true} {
+			env, err := sessionEnv(noInherit, noGlobal, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasEnv(env, "SSHD_LITE_TEST_GLOBAL") == noGlobal {
+				t.Errorf("NoInheritEnv=%v, NoGlobalEnv=%v: unexpected global environment", noInherit, noGlobal)
+			}
+			if hasEnv(env, "SSHD_LITE_TEST_INHERITED") == noInherit {
+				t.Errorf("NoInheritEnv=%v, NoGlobalEnv=%v: unexpected process inheritance", noInherit, noGlobal)
+			}
+		}
+	}
+	// A disabled global environment must not attempt to read the path.
+	if _, err := sessionEnv(false, true, dir); err != nil {
+		t.Fatalf("NoGlobalEnv attempted to read system environment: %v", err)
+	}
+}
+
+func TestSessionEnvironmentOptOutWithNoEssentialVariables(t *testing.T) {
+	for _, name := range baseEnvNames {
+		// Register restoration before removing each essential variable.
+		t.Setenv(name, "")
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env, err := sessionEnv(true, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil || len(env) != 0 {
+		t.Fatal("empty opt-out environment must be non-nil to prevent exec.Cmd inheritance")
 	}
 }
 

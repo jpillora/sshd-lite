@@ -323,12 +323,20 @@ func (c *xconn) HandleSessionChannel(newChannel ssh.NewChannel) error {
 	}
 	c.debugf("Channel accepted")
 
+	env, err := sessionEnv(c.config.NoInheritEnv, c.config.NoGlobalEnv, systemEnvFile)
+	if err != nil {
+		c.errorf("Could not load system environment: %s", err)
+	}
+	for _, kv := range connectionEnv(c.RemoteAddr(), c.LocalAddr()) {
+		env = appendEnv(env, kv)
+	}
+
 	// create session and handle requests
 	sess := &Session{
 		conn:    c,
 		done:    make(chan struct{}),
 		Channel: channel,
-		Env:     append(baseEnv(c.config.InheritEnv), connectionEnv(c.RemoteAddr(), c.LocalAddr())...),
+		Env:     env,
 		// Resize events use latest-value semantics. A capacity of one lets the
 		// request dispatcher replace a stale pending size without blocking.
 		Resizes: make(chan []byte, 1),

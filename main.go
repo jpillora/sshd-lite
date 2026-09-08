@@ -32,6 +32,9 @@ Notes:
   valid again, and any entry with options makes the entire file invalid
 * authenticated names do not select system users or change privileges; shells
   and commands run as the user that started sshd-lite
+* sessions inherit the process environment; no-inherit-env limits this to
+  essential shell variables; /etc/environment supplies defaults on Unix
+  unless no-global-env is set
 * remote commands stream stdin, stdout, and stderr and report their exit status
 * shells, commands, and SFTP start in workdir; if unset, it is the process
   working directory when the server is created
