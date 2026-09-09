@@ -84,15 +84,19 @@ func runInput(t *testing.T, c Config, text string) (int, string, string, error) 
 func TestMoshEndToEnd(t *testing.T) {
 	t.Setenv("SSHD_LITE_TEST_SECRET", "must-not-inherit")
 	c, dir := startServer(t, true)
+	const workdirMarker = ".sshd-lite-mosh-workdir"
+	if err := os.WriteFile(filepath.Join(dir, workdirMarker), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
 	var wg sync.WaitGroup
 	for i := range 3 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			// Shell transforms the marker, so an echoed command cannot pass the test.
-			input := fmt.Sprintf("printf 'RESULT_%%s\\n' %d\npwd\nprintf 'ENV_%%s_END\\n' \"$SSHD_LITE_TEST_SECRET\"\nexit 7\n", i)
+			input := fmt.Sprintf("printf 'RESULT_%%s\\n' %d\ntest -f %s && printf 'WORKDIR_%%s\\n' OK\nprintf 'ENV_%%s_END\\n' \"$SSHD_LITE_TEST_SECRET\"\nexit 7\n", i, workdirMarker)
 			code, out, stderr, err := runInput(t, c, input)
-			if err != nil || code != 7 || !strings.Contains(out, fmt.Sprintf("RESULT_%d", i)) || !strings.Contains(out, dir) || strings.Contains(out, "must-not-inherit") || !strings.Contains(out, "ENV__END") {
+			if err != nil || code != 7 || !strings.Contains(out, fmt.Sprintf("RESULT_%d", i)) || !strings.Contains(out, "WORKDIR_OK") || strings.Contains(out, "must-not-inherit") || !strings.Contains(out, "ENV__END") {
 				t.Errorf("code=%d out=%q stderr=%q err=%v", code, out, stderr, err)
 			}
 		}()

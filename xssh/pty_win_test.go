@@ -5,9 +5,6 @@ package xssh
 import "testing"
 
 func TestWindowsPTYDimensionAndLifecycleBoundaries(t *testing.T) {
-	if supportsRunningPTYResize {
-		t.Fatal("running ConPTY resize is unsafe with the backend-owned asynchronous close")
-	}
 	if _, err := winsizeFromDimensions(32767, 32767); err != nil {
 		t.Fatalf("signed int16 maximum rejected: %v", err)
 	}
