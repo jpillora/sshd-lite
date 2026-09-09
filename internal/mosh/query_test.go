@@ -38,6 +38,7 @@ func (t *queryTerminal) Wait() int                   { <-t.done; return 0 }
 func (t *queryTerminal) Close() error                { t.closeOnce.Do(func() { close(t.done) }); return nil }
 
 func TestQueryBackpressureDoesNotBlockShutdown(t *testing.T) {
+	const timeout = 5 * time.Second
 	s, err := Listen(context.Background(), &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +52,7 @@ func TestQueryBackpressureDoesNotBlockShutdown(t *testing.T) {
 		stop()
 		select {
 		case <-stopped:
-		case <-time.After(time.Second):
+		case <-time.After(timeout):
 			t.Error("server shutdown remained blocked")
 		}
 	})
@@ -66,25 +67,47 @@ func TestQueryBackpressureDoesNotBlockShutdown(t *testing.T) {
 	tr := ssp.NewTransport(ocb, false)
 	conn := udpClient(t, s)
 	tr.ForceNextSend()
-	for _, packet := range tr.Tick() {
-		conn.Write(packet)
+	packets := tr.Tick()
+	if len(packets) == 0 {
+		t.Fatal("client transport generated no initial packet")
 	}
-	select {
-	case <-terminal.writing:
-	case <-time.After(time.Second):
-		t.Fatal("no terminal response was generated")
+	send := func() {
+		for _, packet := range packets {
+			if _, err := conn.Write(packet); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	retry := time.NewTicker(20 * time.Millisecond)
+	defer retry.Stop()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	send()
+	waitingForResponse := true
+	for waitingForResponse {
+		select {
+		case <-terminal.writing:
+			waitingForResponse = false
+		case <-retry.C:
+			// UDP delivery is allowed to be lossy. Replays are harmless once the
+			// server receives a copy, and retrying avoids making this test depend
+			// on the first datagram reaching a busy Windows runner.
+			send()
+		case <-deadline.C:
+			t.Fatal("no terminal response was generated")
+		}
 	}
 	// The bounded response queue must end the overloaded session by itself;
 	// cancellation and expiry cannot depend on a blocked emulator write returning.
 	select {
 	case <-terminal.done:
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		t.Fatal("terminal query backpressure stalled the session")
 	}
 	stop()
 	select {
 	case <-stopped:
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		t.Fatal("query backpressure blocked server shutdown")
 	}
 }

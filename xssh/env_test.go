@@ -207,7 +207,10 @@ func TestSessionEnvironmentOptOutWithNoEssentialVariables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env == nil || len(env) != 0 {
+	// Filtering to the platform's essential names is covered by the baseEnv
+	// tests. The invariant here is non-nil: exec.Cmd interprets nil as a request
+	// to inherit the complete environment.
+	if env == nil {
 		t.Fatal("empty opt-out environment must be non-nil to prevent exec.Cmd inheritance")
 	}
 }
