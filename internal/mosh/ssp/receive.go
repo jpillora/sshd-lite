@@ -9,23 +9,26 @@ import (
 )
 
 func (t *Transport) Recv(data []byte) []byte {
-	if update := t.RecvUpdate(data); update != nil {
+	if update, _ := t.RecvUpdate(data); update != nil {
 		return update.Diff
 	}
 	return nil
 }
 
 // RecvUpdate exposes every accepted state, including empty diffs and shutdown.
-func (t *Transport) RecvUpdate(data []byte) *Update {
+// Fresh reports whether the datagram was authenticated and had a new sequence
+// number. Callers must not infer freshness from LastRecv advancing: two valid
+// datagrams can have equal timestamps on platforms with coarse clocks.
+func (t *Transport) RecvUpdate(data []byte) (update *Update, fresh bool) {
 	if len(data) < minDatagram {
-		return nil
+		return nil, false
 	}
 
 	dirSeq := binary.BigEndian.Uint64(data[:8])
 
 	// Verify direction.
 	if dirSeq&dirToClient != t.toLocal&dirToClient {
-		return nil
+		return nil, false
 	}
 
 	seq := dirSeq & SequenceMask
@@ -33,7 +36,7 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 	t.mu.Lock()
 	if t.replayed(seq) {
 		t.mu.Unlock()
-		return nil // replay
+		return nil, false // replay
 	}
 	t.mu.Unlock()
 
@@ -42,12 +45,12 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 	copy(nonce[4:], data[:8])
 	plaintext := t.ocb.Decrypt(nonce[:], data[8:])
 	if plaintext == nil {
-		return nil
+		return nil, false
 	}
 
 	// Parse timestamp header (4 bytes).
 	if len(plaintext) < 4 {
-		return nil
+		return nil, false
 	}
 	remoteTS := binary.BigEndian.Uint16(plaintext[0:])
 	// plaintext[2:4] is timestamp_reply — used for RTT.
@@ -58,7 +61,7 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 	t.mu.Lock()
 	if t.replayed(seq) {
 		t.mu.Unlock()
-		return nil
+		return nil, false
 	}
 	newest := !t.seqInMaxSet || seq > t.seqInMax
 	if newest {
@@ -81,11 +84,11 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 	// Parse fragment.
 	if len(payload) < fragmentHeaderSize {
 		// Heartbeat with no fragment — that's fine.
-		return nil
+		return nil, true
 	}
 	frag, err := wire.UnmarshalFragment(payload)
 	if err != nil {
-		return nil
+		return nil, true
 	}
 
 	// Reassemble.
@@ -93,17 +96,17 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 	msg := t.assembler.Add(frag)
 	t.mu.Unlock()
 	if msg == nil {
-		return nil
+		return nil, true
 	}
 
 	// Decompress → parse TransportInstruction.
 	decompressed := zlibDecompress(msg)
 	if decompressed == nil {
-		return nil
+		return nil, true
 	}
 	var ti wire.TransportInstruction
 	if err := ti.Unmarshal(decompressed); err != nil || ti.ProtocolVersion != 2 || ti.ThrowawayNum > ti.OldNum {
-		return nil
+		return nil, true
 	}
 
 	if len(ti.LatchCaps) > 0 {
@@ -129,7 +132,7 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 	// Check if we already have new_num (dedup).
 	for _, n := range t.receivedNums {
 		if n == ti.NewNum {
-			return nil
+			return nil, true
 		}
 	}
 
@@ -142,7 +145,7 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 		}
 	}
 	if !hasOld {
-		return nil
+		return nil, true
 	}
 
 	// Process throwaway.
@@ -159,7 +162,7 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 
 	// Never evict an acknowledged state without the sender's permission.
 	if len(t.receivedNums) >= 1024 {
-		return nil
+		return nil, true
 	}
 	// Track oldNum/newNum for state management.
 	t.lastRecvOldNum = ti.OldNum
@@ -178,5 +181,5 @@ func (t *Transport) RecvUpdate(data []byte) *Update {
 		t.pendingDataAck = true
 	}
 
-	return &ti
+	return &ti, true
 }

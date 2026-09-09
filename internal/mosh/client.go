@@ -115,9 +115,8 @@ func RunClient(ctx context.Context, conn net.Conn, key string, initial Request, 
 			}
 			latestSize = &size
 		case dg := <-received:
-			before := tr.LastRecv()
-			update := tr.RecvUpdate(dg)
-			if tr.LastRecv().After(before) {
+			update, fresh := tr.RecvUpdate(dg)
+			if fresh {
 				connected = true
 			}
 			if update == nil {

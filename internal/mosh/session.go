@@ -51,9 +51,8 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 			if time.Since(tr.LastRecv()) >= s.idle {
 				return
 			}
-			before := tr.LastRecv()
-			update := tr.RecvUpdate(p.data)
-			if !tr.LastRecv().After(before) {
+			update, fresh := tr.RecvUpdate(p.data)
+			if !fresh {
 				continue
 			}
 			seq := binary.BigEndian.Uint64(p.data[:8]) & ssp.SequenceMask

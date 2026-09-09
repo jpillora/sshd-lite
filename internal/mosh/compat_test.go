@@ -111,7 +111,7 @@ func TestShutdownReleasesShellAndRepeatsAck(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tr.RecvUpdate(buf[:n])
+		_, _ = tr.RecvUpdate(buf[:n])
 	}
 }
 

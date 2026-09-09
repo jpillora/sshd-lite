@@ -25,7 +25,7 @@ func transfer(from, to *Transport) *Update {
 	from.ForceNextSend()
 	var update *Update
 	for _, dg := range from.Tick() {
-		if u := to.RecvUpdate(dg); u != nil {
+		if u, _ := to.RecvUpdate(dg); u != nil {
 			update = u
 		}
 	}
@@ -42,7 +42,7 @@ func TestReorderedFragmentsAndReplay(t *testing.T) {
 	}
 	var u *Update
 	for i := len(packets) - 1; i >= 0; i-- {
-		if next := b.RecvUpdate(packets[i]); next != nil {
+		if next, _ := b.RecvUpdate(packets[i]); next != nil {
 			u = next
 		}
 	}
@@ -51,7 +51,7 @@ func TestReorderedFragmentsAndReplay(t *testing.T) {
 	}
 	last := b.LastRecv()
 	for _, dg := range packets {
-		if b.RecvUpdate(dg) != nil {
+		if update, fresh := b.RecvUpdate(dg); update != nil || fresh {
 			t.Fatal("replayed state")
 		}
 	}
@@ -61,6 +61,29 @@ func TestReorderedFragmentsAndReplay(t *testing.T) {
 	transfer(b, a)
 	if a.AckedByRemote() != 1 {
 		t.Fatal("missing ACK")
+	}
+}
+
+func TestFreshnessDoesNotDependOnClockAdvancing(t *testing.T) {
+	a, b := transports(t)
+	// Model a coarse clock returning a value no later than the transport's
+	// previous timestamp. Windows can return equal values for adjacent calls;
+	// placing the old value in the future makes the regression deterministic.
+	previous := time.Now().Add(time.Hour)
+	b.mu.Lock()
+	b.lastRecv = previous
+	b.mu.Unlock()
+	a.SetPending([]byte("input"))
+	packets := a.Tick()
+	if len(packets) != 1 {
+		t.Fatalf("initial state used %d datagrams, want 1", len(packets))
+	}
+	update, fresh := b.RecvUpdate(packets[0])
+	if update == nil || !fresh {
+		t.Fatal("authenticated new state was not reported as fresh")
+	}
+	if b.LastRecv().After(previous) {
+		t.Fatal("test did not exercise a non-advancing receive timestamp")
 	}
 }
 func TestLongSessionStatePruningAndShutdown(t *testing.T) {
