@@ -2,25 +2,36 @@ package mosh
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
+
+	"github.com/jpillora/sshd-lite/internal/mosh/display"
+	"github.com/jpillora/sshd-lite/internal/mosh/ssp"
 
 	wire "github.com/unixshells/mosh-go"
 )
 
 // RunClient runs an interactive session. Input and resize channels let callers
 // own and cancel terminal reads without leaving goroutines behind here.
-func RunClient(ctx context.Context, conn net.Conn, key string, input <-chan []byte, sizes <-chan Request, output io.Writer) (int, error) {
-	ocb, err := wire.NewOCBFromBase64(key)
+func RunClient(ctx context.Context, conn net.Conn, key string, initial Request, input <-chan []byte, sizes <-chan Request, output io.Writer) (int, error) {
+	if err := initial.Validate(); err != nil {
+		return 0, err
+	}
+	rawKey, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(key, "="))
+	if err != nil {
+		return 0, errors.New("invalid Mosh key encoding")
+	}
+	ocb, err := wire.NewOCB(rawKey)
 	if err != nil {
 		return 0, err
 	}
-	tr := wire.NewTransport(ocb, false)
-	ctx, cancel := context.WithCancel(ctx)
+	tr := ssp.NewTransport(ocb, false)
+	networkCtx, cancel := context.WithCancel(context.Background())
 	received := make(chan []byte, 64)
 	readerDone := make(chan struct{})
 	defer func() { cancel(); conn.Close(); <-readerDone }()
@@ -31,12 +42,12 @@ func RunClient(ctx context.Context, conn net.Conn, key string, input <-chan []by
 			_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 			n, err := conn.Read(b)
 			if err != nil {
-				if ctx.Err() != nil {
+				if networkCtx.Err() != nil {
 					return
 				}
 				// UDP errors (including ICMP unreachable) can be transient during roaming.
 				select {
-				case <-ctx.Done():
+				case <-networkCtx.Done():
 					return
 				case <-time.After(100 * time.Millisecond):
 				}
@@ -44,11 +55,18 @@ func RunClient(ctx context.Context, conn net.Conn, key string, input <-chan []by
 			}
 			select {
 			case received <- append([]byte(nil), b[:n]...):
-			case <-ctx.Done():
+			case <-networkCtx.Done():
 				return
 			}
 		}
 	}()
+	tr.SetCaps([]byte{0x80})
+	states := display.NewReceiver(int(initial.Cols), int(initial.Rows))
+	defer states.Close()
+	done := ctx.Done()
+	var closingAt time.Time
+	var closeErr error
+	exitCode := 0
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	tr.ForceNextSend()
@@ -69,12 +87,15 @@ func RunClient(ctx context.Context, conn net.Conn, key string, input <-chan []by
 			readInput = nil
 		}
 		select {
-		case <-ctx.Done():
-			// Best effort explicit close; loss still falls back to the idle timeout.
-			tr.SetPending(wire.MarshalUserMessage([]wire.UserInstruction{{Control: &wire.LatchControl{Type: controlClose}}}))
-			tr.ForceNextSend()
+		case <-done:
+			done = nil
+			input = nil
+			sizes = nil
+			pending = nil
+			closingAt = time.Now()
+			closeErr = ctx.Err()
+			tr.StartShutdown()
 			flush()
-			return 0, ctx.Err()
 		case keys, ok := <-readInput:
 			if !ok {
 				input = nil
@@ -95,40 +116,52 @@ func RunClient(ctx context.Context, conn net.Conn, key string, input <-chan []by
 			latestSize = &size
 		case dg := <-received:
 			before := tr.LastRecv()
-			diff := tr.Recv(dg)
+			update := tr.RecvUpdate(dg)
 			if tr.LastRecv().After(before) {
 				connected = true
 			}
-			if len(diff) == 0 {
+			if update == nil {
 				continue
 			}
-			instructions, err := wire.UnmarshalHostMessage(diff)
+			out, err := states.Apply(update)
 			if err != nil {
-				return 0, fmt.Errorf("mosh server message: %w", err)
+				return 0, err
 			}
-			for _, instruction := range instructions {
-				if len(instruction.Hoststring) > 0 {
-					if _, err := output.Write(instruction.Hoststring); err != nil {
-						return 0, err
-					}
+			if len(out) > 0 {
+				if n, err := output.Write(out); err != nil {
+					return 0, err
+				} else if n != len(out) {
+					return 0, io.ErrShortWrite
 				}
-				if instruction.Control != nil && instruction.Control.Type == controlExit {
-					if len(instruction.Control.Payload) != 4 {
+			}
+			messages, err := wire.UnmarshalHostMessage(update.Diff)
+			if err != nil {
+				return 0, err
+			}
+			for _, m := range messages {
+				if m.Control != nil && m.Control.Type == controlExit && tr.HasCap(0x80) {
+					if len(m.Control.Payload) != 4 {
 						return 0, errors.New("invalid mosh exit status")
 					}
-					tr.ForceNextSend()
-					flush()
-					return int(binary.BigEndian.Uint32(instruction.Control.Payload)), nil
+					exitCode = int(binary.BigEndian.Uint32(m.Control.Payload))
 				}
 			}
+			if tr.RemoteShutdown() {
+				tr.ForceNextSend()
+				flush()
+				return exitCode, nil
+			}
 		case <-ticker.C:
+			if tr.ShutdownAcked() || (!closingAt.IsZero() && time.Since(closingAt) > 3*time.Second) {
+				return 0, closeErr
+			}
 			if !connected && time.Since(started) >= 10*time.Second {
 				return 0, errors.New("mosh UDP connection timed out (check the server's UDP port)")
 			}
 			if time.Since(tr.LastRecv()) >= IdleTimeout {
 				return 0, errors.New("mosh session expired after five minutes without authenticated UDP traffic")
 			}
-			// At most one input state is in flight. Retain it in Transport until acked,
+			// At most one input state is in flight. Retain it in ssp.Transport until acked,
 			// so retransmission never applies a keystroke twice.
 			if tr.AckedByRemote() >= tr.SentNum() && (len(pending) > 0 || latestSize != nil) {
 				if latestSize != nil {

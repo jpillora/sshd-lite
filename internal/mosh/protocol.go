@@ -8,13 +8,11 @@ import (
 )
 
 const (
-	RequestName  = "mosh@sshd-lite"
 	IdleTimeout  = 5 * time.Minute
 	maxSessions  = 64
 	tickInterval = 10 * time.Millisecond
-	// Private session controls, carried in mosh-go's extensible control field.
-	controlExit  uint32 = 0x53534801
-	controlClose uint32 = 0x53534802
+	// Optional exit status, negotiated only between sshd-lite peers.
+	controlExit uint32 = 0x53534801
 )
 
 type Request struct {

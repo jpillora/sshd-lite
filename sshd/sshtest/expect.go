@@ -6,8 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/jpillora/sshd-lite/sshd/sshtest/scenario"
 )
 
 // expectOutputAction checks that output contains text.
@@ -16,12 +14,12 @@ type expectOutputAction struct {
 }
 
 // ExpectOutput returns an expectation that output contains text.
-func ExpectOutput(contains string) scenario.Expectation {
-	return &expectOutputAction{contains: contains}
+func ExpectOutput(contains string) Expectation {
+	return expectationAdapter{&expectOutputAction{contains: contains}}
 }
 
-func (e *expectOutputAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectOutputAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	// Check session output if available
 	sess, result := environ.outputState(clientName)
 	if sess != nil {
@@ -55,17 +53,17 @@ type expectOutputMatchAction struct {
 }
 
 // ExpectOutputMatch returns an expectation that output matches a regex.
-func ExpectOutputMatch(pattern string) scenario.Expectation {
+func ExpectOutputMatch(pattern string) Expectation {
 	regex, _ := regexp.Compile(pattern)
-	return &expectOutputMatchAction{pattern: pattern, regex: regex}
+	return expectationAdapter{&expectOutputMatchAction{pattern: pattern, regex: regex}}
 }
 
-func (e *expectOutputMatchAction) Check(ctx context.Context, env interface{}, clientName string) error {
+func (e *expectOutputMatchAction) check(ctx context.Context, env *Environment, clientName string) error {
 	if e.regex == nil {
 		return fmt.Errorf("invalid regex pattern: %s", e.pattern)
 	}
 
-	environ := env.(*Environment)
+	environ := env
 	// Check session output if available
 	sess, result := environ.outputState(clientName)
 	if sess != nil {
@@ -98,12 +96,12 @@ type expectExitCodeAction struct {
 }
 
 // ExpectExitCode returns an expectation that the exit code matches.
-func ExpectExitCode(code int) scenario.Expectation {
-	return &expectExitCodeAction{code: code}
+func ExpectExitCode(code int) Expectation {
+	return expectationAdapter{&expectExitCodeAction{code: code}}
 }
 
-func (e *expectExitCodeAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectExitCodeAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	result, ok := environ.execResult()
 	if !ok {
 		return fmt.Errorf("no exec result available")
@@ -125,12 +123,12 @@ type expectEventAction struct {
 }
 
 // ExpectEvent returns an expectation that an event occurred.
-func ExpectEvent(eventID string, attrs ...string) scenario.Expectation {
-	return &expectEventAction{eventID: eventID, attrs: attrs}
+func ExpectEvent(eventID string, attrs ...string) Expectation {
+	return expectationAdapter{&expectEventAction{eventID: eventID, attrs: attrs}}
 }
 
-func (e *expectEventAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectEventAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	if environ.events.Has(e.eventID, e.attrs...) {
 		return nil
 	}
@@ -151,12 +149,12 @@ type expectNoEventAction struct {
 }
 
 // ExpectNoEvent returns an expectation that an event did NOT occur.
-func ExpectNoEvent(eventID string, attrs ...string) scenario.Expectation {
-	return &expectNoEventAction{eventID: eventID, attrs: attrs}
+func ExpectNoEvent(eventID string, attrs ...string) Expectation {
+	return expectationAdapter{&expectNoEventAction{eventID: eventID, attrs: attrs}}
 }
 
-func (e *expectNoEventAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectNoEventAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	if !environ.events.Has(e.eventID, e.attrs...) {
 		return nil
 	}
@@ -174,12 +172,12 @@ func (e *expectNoEventAction) String() string {
 type expectConnectedAction struct{}
 
 // ExpectConnected returns an expectation that the client is connected.
-func ExpectConnected() scenario.Expectation {
-	return &expectConnectedAction{}
+func ExpectConnected() Expectation {
+	return expectationAdapter{&expectConnectedAction{}}
 }
 
-func (e *expectConnectedAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectConnectedAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	client := environ.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
@@ -198,12 +196,12 @@ func (e *expectConnectedAction) String() string {
 type expectDisconnectedAction struct{}
 
 // ExpectDisconnected returns an expectation that the client is disconnected.
-func ExpectDisconnected() scenario.Expectation {
-	return &expectDisconnectedAction{}
+func ExpectDisconnected() Expectation {
+	return expectationAdapter{&expectDisconnectedAction{}}
 }
 
-func (e *expectDisconnectedAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectDisconnectedAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	client := environ.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
@@ -224,12 +222,12 @@ type expectStdoutAction struct {
 }
 
 // ExpectStdout returns an expectation that stdout contains text.
-func ExpectStdout(contains string) scenario.Expectation {
-	return &expectStdoutAction{contains: contains}
+func ExpectStdout(contains string) Expectation {
+	return expectationAdapter{&expectStdoutAction{contains: contains}}
 }
 
-func (e *expectStdoutAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectStdoutAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	result, ok := environ.execResult()
 	if !ok {
 		return fmt.Errorf("no exec result available")
@@ -250,12 +248,12 @@ type expectStderrAction struct {
 }
 
 // ExpectStderr returns an expectation that stderr contains text.
-func ExpectStderr(contains string) scenario.Expectation {
-	return &expectStderrAction{contains: contains}
+func ExpectStderr(contains string) Expectation {
+	return expectationAdapter{&expectStderrAction{contains: contains}}
 }
 
-func (e *expectStderrAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectStderrAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	result, ok := environ.execResult()
 	if !ok {
 		return fmt.Errorf("no exec result available")
@@ -276,12 +274,12 @@ type expectScreenAction struct {
 }
 
 // ExpectScreen returns an expectation that the screen contains text.
-func ExpectScreen(contains string) scenario.Expectation {
-	return &expectScreenAction{contains: contains}
+func ExpectScreen(contains string) Expectation {
+	return expectationAdapter{&expectScreenAction{contains: contains}}
 }
 
-func (e *expectScreenAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectScreenAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	sess := environ.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
@@ -304,12 +302,12 @@ type expectWaitForOutputAction struct {
 }
 
 // ExpectWaitForOutput returns an expectation that waits for output to contain text.
-func ExpectWaitForOutput(contains string, timeout time.Duration) scenario.Expectation {
-	return &expectWaitForOutputAction{contains: contains, timeout: timeout}
+func ExpectWaitForOutput(contains string, timeout time.Duration) Expectation {
+	return expectationAdapter{&expectWaitForOutputAction{contains: contains, timeout: timeout}}
 }
 
-func (e *expectWaitForOutputAction) Check(ctx context.Context, env interface{}, clientName string) error {
-	environ := env.(*Environment)
+func (e *expectWaitForOutputAction) check(ctx context.Context, env *Environment, clientName string) error {
+	environ := env
 	sess := environ.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
@@ -328,12 +326,12 @@ type customExpectation struct {
 }
 
 // CustomExpectation returns an expectation that executes a custom function.
-func CustomExpectation(name string, fn func(ctx context.Context, env *Environment, clientName string) error) scenario.Expectation {
-	return &customExpectation{name: name, fn: fn}
+func CustomExpectation(name string, fn func(ctx context.Context, env *Environment, clientName string) error) Expectation {
+	return expectationAdapter{&customExpectation{name: name, fn: fn}}
 }
 
-func (e *customExpectation) Check(ctx context.Context, env interface{}, clientName string) error {
-	return e.fn(ctx, env.(*Environment), clientName)
+func (e *customExpectation) check(ctx context.Context, env *Environment, clientName string) error {
+	return e.fn(ctx, env, clientName)
 }
 
 func (e *customExpectation) String() string {

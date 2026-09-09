@@ -3,53 +3,30 @@ package xssh
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
-	"os/exec"
+
+	"github.com/jpillora/sshd-lite/internal/terminal"
 )
 
 // PTY is an interface that abstracts platform-specific PTY implementations.
 // It provides read/write capabilities and a file descriptor holder for resizing.
-type PTY interface {
-	io.ReadWriteCloser
-	FdHolder
-}
+type PTY = terminal.PTY
 
-// FdHolder is an interface for types that can return their file descriptor.
-type FdHolder interface {
-	Fd() uintptr
-}
+// FdHolder is implemented by file-descriptor-backed terminals.
+type FdHolder = terminal.FdHolder
 
-// Winsize describes the terminal size.
-type Winsize struct {
-	Rows uint16
-	Cols uint16
-}
-
-// startPTY starts a command with a PTY attached.
-// If ws is non-nil, the PTY is opened at that size atomically.
-// Platform-specific implementations are in pty_unix.go and pty_win.go.
-var startPTY func(cmd *exec.Cmd, ws *Winsize) (PTY, error)
-
-// setWinsize applies an already validated terminal size. Platform-specific
-// implementations are installed alongside startPTY.
-var setWinsize func(t FdHolder, ws *Winsize) error
+// Winsize describes character dimensions.
+type Winsize = terminal.Size
 
 // Windows' COORD type uses signed int16 fields. Keep one predictable limit on
 // every platform so a size accepted on Unix cannot wrap when used on Windows.
-const maxTerminalDimension = uint32(1<<15 - 1)
+const maxTerminalDimension = terminal.MaxDimension
 
 // winsizeFromDimensions validates SSH's uint32 character dimensions before
 // narrowing them to the uint16 fields supported by our PTY implementations.
 // RFC 4254 requires zero dimensions to be ignored. Since a resize needs both
 // character dimensions, either zero makes the entire size update a no-op.
 func winsizeFromDimensions(cols, rows uint32) (*Winsize, error) {
-	if cols > maxTerminalDimension || rows > maxTerminalDimension {
-		return nil, fmt.Errorf("terminal dimensions out of range: %dx%d (maximum %dx%d)", cols, rows, maxTerminalDimension, maxTerminalDimension)
-	}
-	if cols == 0 || rows == 0 {
-		return nil, nil
-	}
-	return &Winsize{Cols: uint16(cols), Rows: uint16(rows)}, nil
+	return terminal.Dimensions(cols, rows)
 }
 
 // parseDims parses the canonical character-dimension payload used by
@@ -78,5 +55,5 @@ func SetWinsize(t FdHolder, cols, rows uint32) error {
 	if err != nil || ws == nil {
 		return err
 	}
-	return setWinsize(t, ws)
+	return terminal.SetSize(t, ws)
 }

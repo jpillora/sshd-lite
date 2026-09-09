@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jpillora/sshd-lite/internal/testutil"
 	"github.com/jpillora/sshd-lite/sshd/key"
 	"github.com/jpillora/sshd-lite/sshd/sshtest"
 	"github.com/jpillora/sshd-lite/sshd/sshtest/log"
 	"github.com/jpillora/sshd-lite/sshd/sshtest/scenario"
-	"github.com/jpillora/sshd-lite/sshd/xnet"
 )
 
 func TestKeyFromSeed(t *testing.T) {
@@ -133,7 +133,7 @@ func TestLogCapture(t *testing.T) {
 }
 
 func TestFindFreePort(t *testing.T) {
-	port, err := xnet.FindFreePort()
+	port, err := testutil.FindFreePort()
 	if err != nil {
 		t.Fatalf("FindFreePort failed: %v", err)
 	}

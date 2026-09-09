@@ -42,7 +42,7 @@ func testServer(t *testing.T, idle time.Duration) *Server {
 		t.Fatal(err)
 	}
 	s.idle = idle
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close() })
 	return s
 }
 func issue(t *testing.T, s *Server, e *echoTerminal) (Credentials, *wire.Transport) {
@@ -283,7 +283,7 @@ func TestClientRetransmitsWithoutDuplicatingInput(t *testing.T) {
 	output := &recordingOutput{}
 	done := make(chan error, 1)
 	go func() {
-		code, err := RunClient(ctx, &lossyConn{Conn: conn}, credentials.Key, input, nil, output)
+		code, err := RunClient(ctx, &lossyConn{Conn: conn}, credentials.Key, Request{Cols: 80, Rows: 24}, input, nil, output)
 		if err == nil && code != 0 {
 			err = fmt.Errorf("exit %d", code)
 		}

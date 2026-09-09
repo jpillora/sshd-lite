@@ -5,12 +5,10 @@ package client
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -19,10 +17,10 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-func startServer(t *testing.T, mosh bool) (Config, string) {
+func startServer(t *testing.T) (Config, string) {
 	t.Helper()
 	dir := t.TempDir()
-	server, err := sshd.NewServer(sshd.Config{AuthType: "user:pass", KeySeed: "client-test", KeySeedEC: true, Shell: "/bin/sh", WorkDir: dir, Mosh: mosh, LogQuiet: true, NoInheritEnv: true})
+	server, err := sshd.NewServer(sshd.Config{AuthType: "user:pass", KeySeed: "client-test", KeySeedEC: true, Shell: "/bin/sh", WorkDir: dir, LogQuiet: true, NoInheritEnv: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +51,7 @@ func startServer(t *testing.T, mosh bool) (Config, string) {
 		t.Fatal(err)
 	}
 	connection.Close()
-	return Config{Destination: "user@" + listener.Addr().String(), Password: "pass", KnownHosts: known, Mosh: mosh}, dir
+	return Config{Destination: "user@" + listener.Addr().String(), Password: "pass", KnownHosts: known}, dir
 }
 
 func runInput(t *testing.T, c Config, text string) (int, string, string, error) {
@@ -73,7 +71,7 @@ func runInput(t *testing.T, c Config, text string) (int, string, string, error) 
 }
 
 func TestSSHExec(t *testing.T) {
-	c, dir := startServer(t, false)
+	c, dir := startServer(t)
 	c.Command = []string{"cat; pwd; printf error >&2; exit 7"}
 	code, out, stderr, err := runInput(t, c, "SSH input\n")
 	if err != nil || code != 7 || !strings.Contains(out, "SSH input\n") || !strings.Contains(out, dir) || stderr != "error" {
@@ -81,39 +79,8 @@ func TestSSHExec(t *testing.T) {
 	}
 }
 
-func TestMoshEndToEnd(t *testing.T) {
-	t.Setenv("SSHD_LITE_TEST_SECRET", "must-not-inherit")
-	c, dir := startServer(t, true)
-	var wg sync.WaitGroup
-	for i := range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			// Shell transforms the marker, so an echoed command cannot pass the test.
-			input := fmt.Sprintf("printf 'RESULT_%%s\\n' %d\npwd\nprintf 'ENV_%%s_END\\n' \"$SSHD_LITE_TEST_SECRET\"\nexit 7\n", i)
-			code, out, stderr, err := runInput(t, c, input)
-			if err != nil || code != 7 || !strings.Contains(out, fmt.Sprintf("RESULT_%d", i)) || !strings.Contains(out, dir) || strings.Contains(out, "must-not-inherit") || !strings.Contains(out, "ENV__END") {
-				t.Errorf("code=%d out=%q stderr=%q err=%v", code, out, stderr, err)
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-func TestMoshDisabledAndSSHAuthentication(t *testing.T) {
-	c, _ := startServer(t, false)
-	c.Mosh = true
-	if _, _, _, err := runInput(t, c, ""); err == nil || !strings.Contains(err.Error(), "rejected Mosh") {
-		t.Fatalf("expected disabled error, got %v", err)
-	}
-	c.Password = "wrong"
-	if _, _, _, err := runInput(t, c, ""); err == nil {
-		t.Fatal("wrong SSH password accepted")
-	}
-}
-
 func TestHostKeyVerification(t *testing.T) {
-	c, _ := startServer(t, false)
+	c, _ := startServer(t)
 	c.KnownHosts = filepath.Join(t.TempDir(), "empty")
 	os.WriteFile(c.KnownHosts, nil, 0600)
 	c.Command = []string{"true"}

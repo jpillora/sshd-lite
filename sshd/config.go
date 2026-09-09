@@ -2,7 +2,9 @@ package sshd
 
 import (
 	"context"
+	"io"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/jpillora/sshd-lite/xssh"
@@ -41,8 +43,13 @@ type Config struct {
 	LogVerbose           bool `opts:"name=verbose,short=v,help=verbose logs"`
 	LogQuiet             bool `opts:"name=quiet,short=q,help=no logs"`
 	SFTP                 bool `opts:"short=s,help=enable the SFTP subsystem (disabled by default)"`
-	Mosh                 bool `opts:"name=mosh,help=enable Mosh on the same UDP port (five-minute idle timeout)"`
 	TCPForwarding        bool `opts:"name=tcp-forwarding,short=t,help=enable TCP forwarding (both local and reverse; disabled by default)"`
+	// Attach optionally starts a companion listener before accepting SSH.
+	// It runs once per listener and returns that listener's exec handler.
+	// The returned closer, if any, is closed on attachment failure or when the
+	// SSH listener stops. Attach must honor ctx and support independent runs.
+	// Nil leaves SSH unchanged. HandleConn does not invoke this listener hook.
+	Attach func(context.Context, net.Addr) (xssh.ExecHandler, io.Closer, error) `opts:"-"`
 	// programmatic options
 	KeyBytes []byte       `opts:"-"`
 	Logger   *slog.Logger `opts:"-"`

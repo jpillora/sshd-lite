@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jpillora/sshd-lite/internal/mosh"
 	"github.com/jpillora/sshd-lite/xssh"
 	"golang.org/x/crypto/ssh"
 )
@@ -21,13 +20,6 @@ func TestNewServerRejectsBuiltinHandlerConflicts(t *testing.T) {
 		handler   string
 		configure func(*Config)
 	}{
-		{
-			name: "mosh bootstrap", category: "global request", handler: mosh.RequestName,
-			configure: func(c *Config) {
-				c.Mosh = true
-				c.GlobalRequestHandlers = map[string]GlobalRequestHandler{mosh.RequestName: nil}
-			},
-		},
 		{
 			name: "global tcpip-forward", category: "global request", handler: xssh.TCPIPForwardRequestType,
 			configure: func(c *Config) {

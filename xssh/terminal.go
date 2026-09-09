@@ -2,29 +2,21 @@ package xssh
 
 import (
 	"net"
-	"os/exec"
-	"sync"
+
+	"github.com/jpillora/sshd-lite/internal/terminal"
 )
 
 // Terminal is a process-backed PTY for transports with a lifecycle independent
 // of an SSH channel. It uses the same shell, workdir and environment policy.
-type Terminal struct {
-	PTY
-	cmd    *exec.Cmd
-	done   chan struct{}
-	code   int
-	mu     sync.Mutex
-	closed bool
-}
+type Terminal struct{ *terminal.Process }
 
 func StartTerminal(cfg *Config, remote, local net.Addr, term string, cols, rows uint16) (*Terminal, error) {
-	args := []string{}
-	switch shellBase(cfg.Shell) {
-	case "bash", "fish":
-		args = append(args, "-l")
-	}
-	cmd := exec.Command(cfg.Shell, args...)
-	setSysProcAttr(cmd)
+	return StartTerminalCommand(cfg, remote, local, term, cols, rows, nil, nil)
+}
+
+// StartTerminalCommand starts a shell or a literal argv command in a PTY.
+func StartTerminalCommand(cfg *Config, remote, local net.Addr, term string, cols, rows uint16, argv, extraEnv []string) (*Terminal, error) {
+	cmd := terminal.Command(cfg.Shell, argv)
 	cmd.Dir = cfg.WorkingDirectory
 	env, err := sessionEnv(cfg.NoInheritEnv, cfg.NoGlobalEnv, systemEnvFile)
 	if err != nil {
@@ -34,42 +26,15 @@ func StartTerminal(cfg *Config, remote, local net.Addr, term string, cols, rows 
 	if term == "" {
 		term = "xterm-256color"
 	}
+	if !cfg.IgnoreEnv {
+		for _, kv := range extraEnv {
+			cmd.Env = appendEnv(cmd.Env, kv)
+		}
+	}
 	cmd.Env = appendEnv(cmd.Env, "TERM="+term)
-	p, err := startPTY(cmd, &Winsize{Cols: cols, Rows: rows})
+	p, err := terminal.Start(cmd, &Winsize{Cols: cols, Rows: rows})
 	if err != nil {
 		return nil, err
 	}
-	t := &Terminal{PTY: p, cmd: cmd, done: make(chan struct{})}
-	go func() {
-		state, err := cmd.Process.Wait()
-		t.code = 1
-		if err == nil {
-			t.code = int(shellExitCode(state))
-		}
-		close(t.done)
-	}()
-	return t, nil
-}
-
-func (t *Terminal) Wait() int { <-t.done; return t.code }
-
-func (t *Terminal) Resize(cols, rows uint16) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.closed || !supportsRunningPTYResize {
-		return nil
-	}
-	return SetWinsize(t.PTY, uint32(cols), uint32(rows))
-}
-
-func (t *Terminal) Close() error {
-	t.mu.Lock()
-	if !t.closed {
-		t.closed = true
-		_ = t.cmd.Process.Kill()
-		closeShellPTY(t.PTY)
-	}
-	t.mu.Unlock()
-	<-t.done
-	return nil
+	return &Terminal{Process: p}, nil
 }

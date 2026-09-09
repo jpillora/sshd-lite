@@ -1,11 +1,12 @@
-package client
+package termio
 
 import (
-	"golang.org/x/term"
 	"os"
+
+	"golang.org/x/term"
 )
 
-func terminalSize(f *os.File) (int, int) {
+func Size(f *os.File) (int, int) {
 	cols, rows, err := term.GetSize(int(f.Fd()))
 	if err != nil || cols < 1 || rows < 1 {
 		return 80, 24
@@ -19,7 +20,7 @@ func terminalSize(f *os.File) (int, int) {
 	return cols, rows
 }
 
-func rawTerminal(f *os.File) (func(), error) {
+func Raw(f *os.File) (func(), error) {
 	state, err := term.MakeRaw(int(f.Fd()))
 	if err != nil {
 		return nil, err

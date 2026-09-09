@@ -35,12 +35,36 @@ jobs:
         run: go build -v ./...
       - name: Test
         run: go test -v ./...
+  mosh_interop:
+    name: Debian Mosh interoperability
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    steps:
+      - name: Install reference implementations
+        run: |
+          apt-get update
+          apt-get install -y git ca-certificates mosh openssh-server sshpass tmux
+          mkdir -p /run/sshd
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build CLI and test both pairings
+        env:
+          MOSH_TEST_REQUIRED: '1'
+          MOSH_TEST_BIN: /usr/bin
+          MOSH_TEST_LITE: /tmp/sshd-lite-mosh-interop
+        run: |
+          go build -o "$MOSH_TEST_LITE" .
+          go test -v ./mosh ./internal/mosh/...
   # ================
   # RELEASE BINARIES (on push "v*" tag)
   # ================
   release_binaries:
     name: Release Binaries
-    needs: test
+    needs: [test, mosh_interop]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -69,7 +93,7 @@ jobs:
   # ================
   release_docker:
     name: Release Docker Images
-    needs: test
+    needs: [test, mosh_interop]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

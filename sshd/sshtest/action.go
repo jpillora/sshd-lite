@@ -2,7 +2,6 @@ package sshtest
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -13,12 +12,12 @@ import (
 type connectAction struct{}
 
 // Connect returns an action that connects the client.
-func Connect() scenario.Action {
-	return &connectAction{}
+func Connect() Action {
+	return actionAdapter{&connectAction{}}
 }
 
-func (a *connectAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *connectAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
@@ -34,12 +33,12 @@ func (a *connectAction) String() string {
 type disconnectAction struct{}
 
 // Disconnect returns an action that disconnects the client.
-func Disconnect() scenario.Action {
-	return &disconnectAction{}
+func Disconnect() Action {
+	return actionAdapter{&disconnectAction{}}
 }
 
-func (a *disconnectAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *disconnectAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
@@ -58,17 +57,17 @@ type execAction struct {
 }
 
 // Exec returns an action that executes a command.
-func Exec(cmd string) scenario.Action {
-	return &execAction{cmd: cmd}
+func Exec(cmd string) Action {
+	return actionAdapter{&execAction{cmd: cmd}}
 }
 
 // ExecWithResult returns an action that executes a command and stores the result.
-func ExecWithResult(cmd string, result **ExecResult) scenario.Action {
-	return &execAction{cmd: cmd, result: result}
+func ExecWithResult(cmd string, result **ExecResult) Action {
+	return actionAdapter{&execAction{cmd: cmd, result: result}}
 }
 
-func (a *execAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *execAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
@@ -97,17 +96,17 @@ type shellAction struct {
 }
 
 // StartShell returns an action that starts a shell session.
-func StartShell() scenario.Action {
-	return &shellAction{}
+func StartShell() Action {
+	return actionAdapter{&shellAction{}}
 }
 
 // StartShellWithSession returns an action that starts a shell and stores the session.
-func StartShellWithSession(session *Session) scenario.Action {
-	return &shellAction{session: session}
+func StartShellWithSession(session *Session) Action {
+	return actionAdapter{&shellAction{session: session}}
 }
 
-func (a *shellAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *shellAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	client := e.clientByName(clientName)
 	if client == nil {
 		return fmt.Errorf("client %q not found", clientName)
@@ -135,12 +134,12 @@ func (a *shellAction) String() string {
 type closeShellAction struct{}
 
 // CloseShell returns an action that closes the shell session.
-func CloseShell() scenario.Action {
-	return &closeShellAction{}
+func CloseShell() Action {
+	return actionAdapter{&closeShellAction{}}
 }
 
-func (a *closeShellAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *closeShellAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	sess := e.takeSession(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
@@ -158,12 +157,12 @@ type sendInputAction struct {
 }
 
 // SendInput returns an action that sends input to the shell.
-func SendInput(text string) scenario.Action {
-	return &sendInputAction{text: text}
+func SendInput(text string) Action {
+	return actionAdapter{&sendInputAction{text: text}}
 }
 
-func (a *sendInputAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *sendInputAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	sess := e.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
@@ -182,12 +181,12 @@ type sendKeyAction struct {
 }
 
 // SendKey returns an action that sends a special key to the shell.
-func SendKey(key scenario.Key) scenario.Action {
-	return &sendKeyAction{key: key}
+func SendKey(key scenario.Key) Action {
+	return actionAdapter{&sendKeyAction{key: key}}
 }
 
-func (a *sendKeyAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *sendKeyAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	sess := e.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
@@ -206,12 +205,12 @@ type sendLineAction struct {
 }
 
 // SendLine returns an action that sends text followed by Enter.
-func SendLine(text string) scenario.Action {
-	return &sendLineAction{text: text}
+func SendLine(text string) Action {
+	return actionAdapter{&sendLineAction{text: text}}
 }
 
-func (a *sendLineAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *sendLineAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	sess := e.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
@@ -231,12 +230,12 @@ type resizePTYAction struct {
 }
 
 // ResizePTY returns an action that resizes the PTY.
-func ResizePTY(cols, rows uint32) scenario.Action {
-	return &resizePTYAction{cols: cols, rows: rows}
+func ResizePTY(cols, rows uint32) Action {
+	return actionAdapter{&resizePTYAction{cols: cols, rows: rows}}
 }
 
-func (a *resizePTYAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *resizePTYAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	sess := e.sessionByName(clientName)
 	if sess == nil {
 		return fmt.Errorf("no active session for client %q", clientName)
@@ -254,11 +253,11 @@ type sleepAction struct {
 }
 
 // Sleep returns an action that waits for a duration.
-func Sleep(d time.Duration) scenario.Action {
-	return &sleepAction{duration: d}
+func Sleep(d time.Duration) Action {
+	return actionAdapter{&sleepAction{duration: d}}
 }
 
-func (a *sleepAction) Execute(ctx context.Context, env interface{}, clientName string) error {
+func (a *sleepAction) execute(ctx context.Context, env *Environment, clientName string) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -279,25 +278,25 @@ type waitForEventAction struct {
 }
 
 // WaitForEvent returns an action that waits for an event.
-func WaitForEvent(eventID string, attrs ...string) scenario.Action {
-	return &waitForEventAction{
+func WaitForEvent(eventID string, attrs ...string) Action {
+	return actionAdapter{&waitForEventAction{
 		eventID: eventID,
 		attrs:   attrs,
 		timeout: 10 * time.Second,
-	}
+	}}
 }
 
 // WaitForEventTimeout returns an action that waits for an event with a custom timeout.
-func WaitForEventTimeout(timeout time.Duration, eventID string, attrs ...string) scenario.Action {
-	return &waitForEventAction{
+func WaitForEventTimeout(timeout time.Duration, eventID string, attrs ...string) Action {
+	return actionAdapter{&waitForEventAction{
 		eventID: eventID,
 		attrs:   attrs,
 		timeout: timeout,
-	}
+	}}
 }
 
-func (a *waitForEventAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
+func (a *waitForEventAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	e := env
 	_, err := e.events.WaitTimeout(a.timeout, a.eventID, a.attrs...)
 	return err
 }
@@ -309,163 +308,6 @@ func (a *waitForEventAction) String() string {
 	return fmt.Sprintf("WaitForEvent(%q)", a.eventID)
 }
 
-// sftpUploadAction uploads a file via SFTP.
-type sftpUploadAction struct {
-	localPath  string
-	remotePath string
-}
-
-// SFTPUpload returns an action that uploads a file via SFTP.
-func SFTPUpload(localPath, remotePath string) scenario.Action {
-	return &sftpUploadAction{localPath: localPath, remotePath: remotePath}
-}
-
-func (a *sftpUploadAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	return executeSFTPOperation(ctx, env, clientName, "upload", func(client *SFTPClient) error {
-		if err := client.Upload(a.localPath, a.remotePath); err != nil {
-			return fmt.Errorf("upload local path %q to remote path %q: %w", a.localPath, a.remotePath, err)
-		}
-		return nil
-	})
-}
-
-func (a *sftpUploadAction) String() string {
-	return fmt.Sprintf("SFTPUpload(%q, %q)", a.localPath, a.remotePath)
-}
-
-// sftpDownloadAction downloads a file via SFTP.
-type sftpDownloadAction struct {
-	remotePath string
-	localPath  string
-}
-
-// SFTPDownload returns an action that downloads a file via SFTP.
-func SFTPDownload(remotePath, localPath string) scenario.Action {
-	return &sftpDownloadAction{remotePath: remotePath, localPath: localPath}
-}
-
-func (a *sftpDownloadAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	return executeSFTPOperation(ctx, env, clientName, "download", func(client *SFTPClient) error {
-		if err := client.Download(a.remotePath, a.localPath); err != nil {
-			return fmt.Errorf("download remote path %q to local path %q: %w", a.remotePath, a.localPath, err)
-		}
-		return nil
-	})
-}
-
-func (a *sftpDownloadAction) String() string {
-	return fmt.Sprintf("SFTPDownload(%q, %q)", a.remotePath, a.localPath)
-}
-
-func executeSFTPOperation(ctx context.Context, rawEnv interface{}, clientName, operation string, fn func(*SFTPClient) error) error {
-	e, ok := rawEnv.(*Environment)
-	if !ok || e == nil {
-		return fmt.Errorf("SFTP %s: invalid test environment %T", operation, rawEnv)
-	}
-	client := e.clientByName(clientName)
-	if client == nil {
-		return fmt.Errorf("client %q not found", clientName)
-	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("SFTP %s canceled before session start: %w", operation, err)
-	}
-
-	sftpClient, err := client.SFTP()
-	if err != nil {
-		return fmt.Errorf("start SFTP session for %s: %w", operation, err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- fn(sftpClient) }()
-
-	select {
-	case err := <-done:
-		if closeErr := sftpClient.Close(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("close SFTP session after %s: %w", operation, closeErr))
-		}
-		return err
-	case <-ctx.Done():
-	}
-
-	// pkg/sftp Close interrupts outstanding requests. Close synchronously, then
-	// join the one operation goroutine: the action never abandons goroutines it
-	// owns. Real controlled-transfer tests enforce the practical time bound.
-	closeErr := sftpClient.Close()
-	operationErr := <-done
-	// The operation may have committed its result immediately before Close won
-	// the lifecycle lock. In that case completion, not cancellation, is the
-	// observable outcome even if this select happened to receive ctx.Done.
-	if operationErr == nil {
-		if closeErr != nil {
-			return fmt.Errorf("close completed SFTP %s session: %w", operation, closeErr)
-		}
-		return nil
-	}
-	if operationErr != nil {
-		operationErr = fmt.Errorf("SFTP %s stopped after cancellation: %w", operation, operationErr)
-	}
-	if closeErr != nil {
-		closeErr = fmt.Errorf("close canceled SFTP %s session: %w", operation, closeErr)
-	}
-	return errors.Join(fmt.Errorf("SFTP %s canceled: %w", operation, ctx.Err()), operationErr, closeErr)
-}
-
-// localForwardAction creates a local port forward.
-type localForwardAction struct {
-	localAddr  string
-	remoteAddr string
-}
-
-// LocalForward returns an action that creates a local port forward.
-func LocalForward(localAddr, remoteAddr string) scenario.Action {
-	return &localForwardAction{localAddr: localAddr, remoteAddr: remoteAddr}
-}
-
-func (a *localForwardAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
-	client := e.clientByName(clientName)
-	if client == nil {
-		return fmt.Errorf("client %q not found", clientName)
-	}
-	listener, err := client.LocalForward(a.localAddr, a.remoteAddr)
-	if err != nil {
-		return err
-	}
-	// Store listener for cleanup
-	if !e.storeForwardListener(clientName, listener) {
-		_ = listener.Close()
-		return fmt.Errorf("environment stopped while creating local forward for client %q", clientName)
-	}
-	return nil
-}
-
-func (a *localForwardAction) String() string {
-	return fmt.Sprintf("LocalForward(%q, %q)", a.localAddr, a.remoteAddr)
-}
-
-// remoteForwardAction creates a remote port forward.
-type remoteForwardAction struct {
-	remoteAddr string
-	localAddr  string
-}
-
-// RemoteForward returns an action that creates a remote port forward.
-func RemoteForward(remoteAddr, localAddr string) scenario.Action {
-	return &remoteForwardAction{remoteAddr: remoteAddr, localAddr: localAddr}
-}
-
-func (a *remoteForwardAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	e := env.(*Environment)
-	client := e.clientByName(clientName)
-	if client == nil {
-		return fmt.Errorf("client %q not found", clientName)
-	}
-	return client.RemoteForward(a.remoteAddr, a.localAddr)
-}
-
-func (a *remoteForwardAction) String() string {
-	return fmt.Sprintf("RemoteForward(%q, %q)", a.remoteAddr, a.localAddr)
-}
-
 // customAction allows arbitrary functions as actions.
 type customAction struct {
 	name string
@@ -473,12 +315,12 @@ type customAction struct {
 }
 
 // Custom returns an action that executes a custom function.
-func Custom(name string, fn func(ctx context.Context, env *Environment, clientName string) error) scenario.Action {
-	return &customAction{name: name, fn: fn}
+func Custom(name string, fn func(ctx context.Context, env *Environment, clientName string) error) Action {
+	return actionAdapter{&customAction{name: name, fn: fn}}
 }
 
-func (a *customAction) Execute(ctx context.Context, env interface{}, clientName string) error {
-	return a.fn(ctx, env.(*Environment), clientName)
+func (a *customAction) execute(ctx context.Context, env *Environment, clientName string) error {
+	return a.fn(ctx, env, clientName)
 }
 
 func (a *customAction) String() string {

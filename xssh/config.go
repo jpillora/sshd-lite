@@ -60,6 +60,11 @@ type Config struct {
 	ChannelHandlers        map[string]ChannelHandler
 	SessionRequestHandlers map[string]SessionRequestHandler
 	SubsystemHandlers      map[string]SubsystemHandler
+	// ExecHandler optionally handles a virtual command after SSH exec acceptance.
+	// Return handled=false to run the ordinary shell command. When handled=true,
+	// the callback owns stdout/stderr, exit-status and channel closure; it must
+	// return promptly when sess.Done closes.
+	ExecHandler ExecHandler
 	// SFTP enables the SFTP subsystem handler.
 	SFTP bool
 	// LocalForwarding enables direct-tcpip channel handling (client requests server to connect).
@@ -67,6 +72,11 @@ type Config struct {
 	// RemoteForwarding enables tcpip-forward global request handling (client requests server to listen).
 	RemoteForwarding bool
 }
+
+// ExecHandler handles an accepted exec request. Return handled=false to run the
+// ordinary SSH command. When handled=true, the handler owns output, exit status
+// and channel closure, and must return promptly when sess.Done closes.
+type ExecHandler func(sess *Session, command string) (handled bool, err error)
 
 // GlobalRequestHandler handles global (connection-level) SSH requests.
 // Return an error to reject the request; return nil to accept.

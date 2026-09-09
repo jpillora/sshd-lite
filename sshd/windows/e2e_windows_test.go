@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jpillora/sshd-lite/internal/testutil"
 	"github.com/jpillora/sshd-lite/sshd"
-	"github.com/jpillora/sshd-lite/sshd/xnet"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -54,7 +54,7 @@ func startTestServer(t *testing.T, shell string) *testServer {
 		t.Fatalf("Failed to create SSH public key: %v", err)
 	}
 
-	portNum, err := xnet.FindFreePort()
+	portNum, err := testutil.FindFreePort()
 	if err != nil {
 		t.Fatalf("Failed to get random port: %v", err)
 	}

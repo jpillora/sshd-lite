@@ -11,6 +11,7 @@ import (
 
 	"github.com/jpillora/opts"
 	"github.com/jpillora/sshd-lite/client"
+	"github.com/jpillora/sshd-lite/mosh"
 	"github.com/jpillora/sshd-lite/sshd"
 )
 
@@ -46,10 +47,24 @@ Notes:
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "client" {
 		os.Args = append(os.Args[:1], os.Args[2:]...)
-		c := client.Config{}
+		c := struct {
+			client.Config
+			Mosh       bool   `opts:"name=mosh,help=use SSH to obtain a key then run the terminal over UDP"`
+			MoshServer string `opts:"name=mosh-server,help=remote mosh-server executable (default mosh-server)"`
+		}{}
 		opts.New(&c).Name("sshd-lite client").Version(version).Parse()
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		code, err := client.Run(ctx, c, os.Stdin, os.Stdout, os.Stderr)
+		var code int
+		var err error
+		if c.Mosh {
+			conn, connectErr := client.Connect(ctx, c.Config)
+			err = connectErr
+			if err == nil {
+				code, err = mosh.Run(ctx, conn, os.Stdin, os.Stdout, mosh.ClientConfig{Server: c.MoshServer, Command: c.Command})
+			}
+		} else {
+			code, err = client.Run(ctx, c.Config, os.Stdin, os.Stdout, os.Stderr)
+		}
 		cancel()
 		if err != nil {
 			log.Print(err)
@@ -58,12 +73,15 @@ func main() {
 		os.Exit(code)
 	}
 
-	c := sshd.Config{
+	c := struct {
+		sshd.Config
+		Mosh bool `opts:"name=mosh,help=enable Mosh on the same UDP port (five-minute idle timeout)"`
+	}{Config: sshd.Config{
 		Host:                 "0.0.0.0",
 		KeepAlive:            60,
 		HandshakeTimeout:     sshd.DefaultHandshakeTimeout,
 		MaxPendingHandshakes: sshd.DefaultMaxPendingHandshakes,
-	}
+	}}
 
 	opts.New(&c).
 		Name("sshd-lite").
@@ -74,7 +92,10 @@ func main() {
 		DocBefore("version", "notes", notes).
 		Parse()
 
-	s, err := sshd.NewServer(c)
+	if c.Mosh {
+		c.Attach = mosh.Attach
+	}
+	s, err := sshd.NewServer(c.Config)
 	if err != nil {
 		log.Fatal(err)
 	}

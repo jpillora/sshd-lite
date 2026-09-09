@@ -2,23 +2,8 @@
 package scenario
 
 import (
-	"context"
-	"fmt"
-	"strings"
 	"time"
 )
-
-// Action is something a client does in a test scenario.
-type Action interface {
-	Execute(ctx context.Context, env interface{}, clientName string) error
-	String() string
-}
-
-// Expectation is something we verify after actions.
-type Expectation interface {
-	Check(ctx context.Context, env interface{}, clientName string) error
-	String() string
-}
 
 // Scenario describes a test scenario.
 type Scenario struct {
@@ -38,10 +23,6 @@ type Step struct {
 type ActionSpec struct {
 	Type   ActionType
 	Params map[string]interface{}
-}
-
-func (a *ActionSpec) Execute(ctx context.Context, env interface{}, clientName string) error {
-	return nil
 }
 
 func (a *ActionSpec) String() string {
@@ -73,10 +54,6 @@ const (
 type ExpectationSpec struct {
 	Type   ExpectationType
 	Params map[string]interface{}
-}
-
-func (e *ExpectationSpec) Check(ctx context.Context, env interface{}, clientName string) error {
-	return nil
 }
 
 func (e *ExpectationSpec) String() string {
@@ -262,176 +239,4 @@ func (e *ExpectationSpec) Timeout() time.Duration {
 		return v
 	}
 	return 5 * time.Second
-}
-
-// Key represents special keys for SendKey action.
-type Key string
-
-const (
-	KeyEnter     Key = "\r"
-	KeyTab       Key = "\t"
-	KeyEscape    Key = "\x1b"
-	KeyBackspace Key = "\x7f"
-	KeyCtrlC     Key = "\x03"
-	KeyCtrlD     Key = "\x04"
-	KeyCtrlZ     Key = "\x1a"
-	KeyUp        Key = "\x1b[A"
-	KeyDown      Key = "\x1b[B"
-	KeyRight     Key = "\x1b[C"
-	KeyLeft      Key = "\x1b[D"
-)
-
-// ParseKey converts a key name string to Key constant.
-func ParseKey(name string) (Key, error) {
-	switch strings.ToLower(name) {
-	case "enter", "return":
-		return KeyEnter, nil
-	case "tab":
-		return KeyTab, nil
-	case "escape", "esc":
-		return KeyEscape, nil
-	case "backspace":
-		return KeyBackspace, nil
-	case "ctrl+c", "ctrlc":
-		return KeyCtrlC, nil
-	case "ctrl+d", "ctrld":
-		return KeyCtrlD, nil
-	case "ctrl+z", "ctrlz":
-		return KeyCtrlZ, nil
-	case "up":
-		return KeyUp, nil
-	case "down":
-		return KeyDown, nil
-	case "left":
-		return KeyLeft, nil
-	case "right":
-		return KeyRight, nil
-	default:
-		return "", fmt.Errorf("unknown key: %s", name)
-	}
-}
-
-// KeyLabel returns the human-readable name for a key.
-func KeyLabel(k Key) string {
-	switch k {
-	case KeyEnter:
-		return "Enter"
-	case KeyTab:
-		return "Tab"
-	case KeyEscape:
-		return "Escape"
-	case KeyBackspace:
-		return "Backspace"
-	case KeyCtrlC:
-		return "Ctrl+C"
-	case KeyCtrlD:
-		return "Ctrl+D"
-	case KeyCtrlZ:
-		return "Ctrl+Z"
-	case KeyUp:
-		return "Up"
-	case KeyDown:
-		return "Down"
-	case KeyLeft:
-		return "Left"
-	case KeyRight:
-		return "Right"
-	default:
-		return "unknown"
-	}
-}
-
-// Predefined event IDs.
-const (
-	EventConnected        = "connected"
-	EventDisconnected     = "disconnected"
-	EventAuthSuccess      = "auth.success"
-	EventAuthFailure      = "auth.failure"
-	EventSessionStarted   = "session.started"
-	EventSessionEnded     = "session.ended"
-	EventExecStarted      = "exec.started"
-	EventExecCompleted    = "exec.completed"
-	EventPTYRequested     = "pty.requested"
-	EventPTYResized       = "pty.resized"
-	EventSFTPStarted      = "sftp.started"
-	EventSFTPEnded        = "sftp.ended"
-	EventForwardRequested = "forward.requested"
-	EventForwardCancelled = "forward.cancelled"
-	EventShellStarted     = "shell.started"
-	EventShellEnded       = "shell.ended"
-)
-
-// Event represents something that happened during the test.
-type Event struct {
-	ID        string
-	Timestamp time.Time
-	Attrs     map[string]string
-}
-
-// Matches checks if this event matches the given ID and key-value pairs.
-func (e Event) Matches(id string, attrs ...string) bool {
-	if e.ID != id {
-		return false
-	}
-	if len(attrs)%2 != 0 {
-		return false
-	}
-	for i := 0; i < len(attrs); i += 2 {
-		key, value := attrs[i], attrs[i+1]
-		if e.Attrs[key] != value {
-			return false
-		}
-	}
-	return true
-}
-
-// String returns a human-readable representation of the event.
-func (e Event) String() string {
-	var sb strings.Builder
-	sb.WriteString(e.ID)
-	if len(e.Attrs) > 0 {
-		sb.WriteString("{")
-		first := true
-		for k, v := range e.Attrs {
-			if !first {
-				sb.WriteString(", ")
-			}
-			first = false
-			sb.WriteString(k)
-			sb.WriteString("=")
-			sb.WriteString(v)
-		}
-		sb.WriteString("}")
-	}
-	return sb.String()
-}
-
-// ScenarioError provides detailed error context for scenario failures.
-type ScenarioError struct {
-	Scenario    string
-	StepNum     int
-	ClientName  string
-	Action      string
-	Expectation string
-	Err         error
-}
-
-func (e *ScenarioError) Error() string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("scenario %q failed at step %d", e.Scenario, e.StepNum+1))
-	if e.ClientName != "" {
-		sb.WriteString(fmt.Sprintf(" (client: %s)", e.ClientName))
-	}
-	if e.Action != "" {
-		sb.WriteString(fmt.Sprintf("\n  action: %s", e.Action))
-	}
-	if e.Expectation != "" {
-		sb.WriteString(fmt.Sprintf("\n  expectation: %s", e.Expectation))
-	}
-	sb.WriteString(fmt.Sprintf("\n  error: %s", e.Err))
-	return sb.String()
-}
-
-func (e *ScenarioError) Unwrap() error {
-	return e.Err
 }

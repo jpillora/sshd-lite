@@ -1,6 +1,6 @@
 //go:build !windows
 
-package client
+package termio
 
 import (
 	"context"
@@ -9,9 +9,9 @@ import (
 	"syscall"
 )
 
-func openTTY() (*os.File, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
+func OpenTTY() (*os.File, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
 
-func watchResize(ctx context.Context, f *os.File, resize func(int, int)) func() {
+func WatchResize(ctx context.Context, f *os.File, resize func(int, int)) func() {
 	ctx, cancel := context.WithCancel(ctx)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGWINCH)
@@ -23,7 +23,7 @@ func watchResize(ctx context.Context, f *os.File, resize func(int, int)) func() 
 			case <-ctx.Done():
 				return
 			case <-signals:
-				cols, rows := terminalSize(f)
+				cols, rows := Size(f)
 				resize(cols, rows)
 			}
 		}

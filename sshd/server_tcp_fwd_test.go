@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jpillora/sshd-lite/internal/testutil"
 	"github.com/jpillora/sshd-lite/sshd/sshtest"
-	"github.com/jpillora/sshd-lite/sshd/xhttp"
-	"github.com/jpillora/sshd-lite/sshd/xnet"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -23,7 +22,7 @@ var tcpForwardingLocal = testCase{
 	},
 	client: func(addr string) (retErr error) {
 		// 1. Start a test HTTP server
-		httpServer, err := xhttp.NewTestServer("foo")
+		httpServer, err := testutil.NewTestServer("foo")
 		if err != nil {
 			return err
 		}
@@ -45,7 +44,7 @@ var tcpForwardingLocal = testCase{
 		// - We ask the SSH server to listen on a port
 		// - When connections come in, the server forwards them back to us
 		// - We then forward them to our local HTTP server
-		localPort, err := xnet.GetRandomPort()
+		localPort, err := testutil.GetRandomPort()
 		if err != nil {
 			return fmt.Errorf("failed to get random port: %w", err)
 		}
@@ -74,13 +73,13 @@ var tcpForwardingLocal = testCase{
 						conn.Close()
 						return
 					}
-					xnet.ForwardConnections(conn, httpConn)
+					testutil.ForwardConnections(conn, httpConn)
 				}(conn)
 			}
 		}()
 
 		// 4. Test HTTP request through port forward
-		return xhttp.TestGet(fmt.Sprintf("http://127.0.0.1:%s/", localPort), "foo")
+		return testutil.TestGet(fmt.Sprintf("http://127.0.0.1:%s/", localPort), "foo")
 	},
 }
 
@@ -119,7 +118,7 @@ var tcpForwardingRemote = testCase{
 		remoteAddr := remoteListener.Addr().String()
 
 		// 3. Start our local HTTP server that will receive the forwarded connections
-		httpServer, err := xhttp.NewTestServer("bar")
+		httpServer, err := testutil.NewTestServer("bar")
 		if err != nil {
 			return err
 		}
@@ -144,7 +143,7 @@ var tcpForwardingRemote = testCase{
 			}
 
 			connectionReceived <- nil
-			xnet.ForwardConnections(conn, httpConn)
+			testutil.ForwardConnections(conn, httpConn)
 		}()
 
 		// 5. Make an HTTP request to the remote port

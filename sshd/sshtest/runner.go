@@ -112,7 +112,7 @@ func (r *Runner) checkExpectation(ctx context.Context, scenarioName string, step
 	return nil
 }
 
-func actionToInterface(as scenario.ActionSpec) (scenario.Action, error) {
+func actionToInterface(as scenario.ActionSpec) (Action, error) {
 	switch as.Type {
 	case scenario.ActionConnect:
 		return Connect(), nil
@@ -153,7 +153,7 @@ func actionToInterface(as scenario.ActionSpec) (scenario.Action, error) {
 	}
 }
 
-func expectationToInterface(es scenario.ExpectationSpec) (scenario.Expectation, error) {
+func expectationToInterface(es scenario.ExpectationSpec) (Expectation, error) {
 	switch es.Type {
 	case scenario.ExpectConnected:
 		return ExpectConnected(), nil

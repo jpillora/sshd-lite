@@ -1,7 +1,7 @@
 //go:build !windows
 // +build !windows
 
-package xssh
+package terminal
 
 import (
 	"fmt"
@@ -14,14 +14,14 @@ import (
 const supportsRunningPTYResize = true
 
 func init() {
-	startPTY = func(cmd *exec.Cmd, ws *Winsize) (PTY, error) {
+	startPTY = func(cmd *exec.Cmd, ws *Size) (PTY, error) {
 		var pws *pty.Winsize
 		if ws != nil {
 			pws = &pty.Winsize{Rows: ws.Rows, Cols: ws.Cols}
 		}
 		return pty.StartWithSize(cmd, pws)
 	}
-	setWinsize = func(t FdHolder, ws *Winsize) error {
+	setSize = func(t FdHolder, ws *Size) error {
 		f, ok := t.(*os.File)
 		if !ok {
 			return fmt.Errorf("SetWinsize: expected *os.File, got %T", t)

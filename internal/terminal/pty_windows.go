@@ -1,7 +1,7 @@
 //go:build windows
 // +build windows
 
-package xssh
+package terminal
 
 import (
 	"errors"
@@ -16,14 +16,14 @@ import (
 const supportsRunningPTYResize = false
 
 func init() {
-	startPTY = func(cmd *exec.Cmd, ws *Winsize) (PTY, error) {
+	startPTY = func(cmd *exec.Cmd, ws *Size) (PTY, error) {
 		var pws *winpty.Winsize
 		if ws != nil {
 			pws = &winpty.Winsize{Rows: ws.Rows, Cols: ws.Cols}
 		}
 		return winpty.StartWithSize(cmd, pws)
 	}
-	setWinsize = func(t FdHolder, ws *Winsize) error {
+	setSize = func(t FdHolder, ws *Size) error {
 		return errors.New("SetWinsize: resizing a running ConPTY is unsafe with the current backend")
 	}
 }

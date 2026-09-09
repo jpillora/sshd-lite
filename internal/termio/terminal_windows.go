@@ -1,4 +1,4 @@
-package client
+package termio
 
 import (
 	"context"
@@ -6,22 +6,22 @@ import (
 	"time"
 )
 
-func openTTY() (*os.File, error) { return os.OpenFile("CONIN$", os.O_RDWR, 0) }
+func OpenTTY() (*os.File, error) { return os.OpenFile("CONIN$", os.O_RDWR, 0) }
 
-func watchResize(ctx context.Context, f *os.File, resize func(int, int)) func() {
+func WatchResize(ctx context.Context, f *os.File, resize func(int, int)) func() {
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
-		cols, rows := terminalSize(f)
+		cols, rows := Size(f)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				c, r := terminalSize(f)
+				c, r := Size(f)
 				if c != cols || r != rows {
 					cols, rows = c, r
 					resize(c, r)

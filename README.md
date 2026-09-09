@@ -90,8 +90,8 @@ file. For a local test with a randomly generated server host key, explicitly
 add `--insecure`. Authentication uses the SSH agent, default Ed25519/RSA keys,
 `--identity`, or a password prompt (`--password` also works).
 
-Mosh uses [mosh-go](https://github.com/unixshells/mosh-go) for authenticated
-encryption, terminal screen updates and UDP retransmission. Open **both TCP
+Mosh uses [mosh-go](https://github.com/unixshells/mosh-go) encryption and wire
+codecs, with a local state synchronization transport and terminal renderer. Open **both TCP
 and UDP** on the chosen port. All sessions share that UDP port, including when
 the server chooses port 2200 as its fallback. Each authenticated SSH request
 issues a fresh 128-bit session key. The SSH connection then closes; changing
@@ -109,14 +109,132 @@ Mosh starts the same configured shell in the same working directory and uses
 the same environment policy as SSH. Exit the shell normally, or type
 **Ctrl-^ then .** to disconnect. Terminal resizing is supported on Unix;
 Windows retains its initial ConPTY size, matching the existing backend's
-limitation. Mosh is for interactive shells; use the SSH client for commands,
-separate stderr or binary streams.
+limitation. Mosh can also launch a terminal command; use SSH for separate
+stderr, binary streams, or portable remote exit-status reporting.
 
-This integration uses an sshd-lite SSH bootstrap request and an extension for
-exit status. Use the bundled `sshd-lite client --mosh`; the standard `mosh`
-launcher is not supported. No external `mosh-server` executable is required.
+The client and server interoperate independently with Debian Mosh 1.4.0:
+
+```sh
+# Standard Debian client → sshd-lite server (server started with --mosh)
+mosh --ssh='ssh -p 2222' user@host
+
+# sshd-lite client → standard Mosh server via SSH
+sshd-lite client --mosh user@host
+
+# Run a terminal command; arguments are passed literally
+sshd-lite client --mosh --port 2222 user@host tmux new-session
+```
+
+With `--mosh`, sshd-lite handles literal `mosh-server new ...` commands inside
+an authenticated SSH exec channel and returns the standard `MOSH CONNECT`
+response. No external server executable is needed. Ordinary SSH commands still
+use the configured shell. The client uses this standard bootstrap and accepts
+`--mosh-server /path/to/mosh-server` for an alternate remote executable.
+
+For remote commands containing options, put `--` before the destination, for
+example `sshd-lite client --mosh -- user@host tmux new-session -s work`.
+
+The embedded server always uses its shared UDP port: a requested `-p` range
+must include that port. It supports the standard launcher's proxy and remote
+address discovery. For multihomed servers, bind sshd-lite to the intended local
+address; the shared socket does not select a source address per session.
+Custom shell wrappers/expansions and absolute executable paths are executed
+by the ordinary SSH shell, outside the virtual bootstrap.
+
+Standard Mosh has no remote process exit-status field; mixed sessions return
+success on clean protocol shutdown. Two sshd-lite peers negotiate an optional
+exit-status extension. Mosh synchronizes the current screen, so a connection resuming
+within the five-minute grace period restores it but does not recover scrollback.
+The simple client has no predictive local echo. Terminal behavior is limited to
+the emulator's supported escape sequences; this is not a claim of complete
+terminal-feature parity with Debian Mosh.
+
+Linux interoperability tests use installed `mosh`, `mosh-client`, `mosh-server`,
+`sshpass`, `tmux`, and `/usr/sbin/sshd`. Set `MOSH_TEST_BIN` to test another Mosh
+installation, `MOSH_TEST_LITE` to a built sshd-lite binary, and
+`MOSH_TEST_REQUIRED=1` to fail when a required test dependency is missing.
 
 Run `sshd-lite client --help` for client options.
+
+### Embedding Mosh in Go
+
+Both peers are public Go APIs. The CLI uses the same client session implementation.
+Importing `sshd`, `client`, or `xssh` alone does not import Mosh, its terminal
+emulator, or its bootstrap parser. The CLI opts in to Mosh when `--mosh` is set.
+The module remains a single Go module; the default CLI binary includes both
+protocols, while SSH-only library builds exclude the Mosh packages.
+See [architecture](docs/architecture.md) for package ownership and dependencies.
+See [example/mosh/main.go](example/mosh/main.go) for a complete in-process server
+and client with generated keys, verified authentication, and context shutdown:
+
+```sh
+go run ./example/mosh
+```
+
+Import `github.com/jpillora/sshd-lite/mosh` explicitly to enable the embedded
+server:
+
+```go
+server, err := sshd.NewServer(sshd.Config{
+    AuthKeys: userKeys,
+    KeyBytes: hostKeyPEM,
+    Attach: mosh.Attach,
+})
+```
+
+Then call `server.StartContext(ctx)` or
+`server.StartWithContext(ctx, listener)`. A caller-supplied TCP listener also
+selects the UDP port, including when bound to port zero. Cancelling the context
+stops both listeners and their sessions. Configure `KeyBytes` and `AuthKeys`
+for in-memory keys, or use the existing server authentication options.
+
+Use the same opt-in `mosh` package for the client:
+
+```go
+// ctx, address, userKey, hostKey and screenWriter belong to your application.
+session, err := mosh.Dial(ctx, address, &ssh.ClientConfig{
+    User: "user",
+    Auth: []ssh.AuthMethod{ssh.PublicKeys(userKey)},
+    HostKeyCallback: ssh.FixedHostKey(hostKey),
+}, mosh.ClientConfig{
+    Columns: 80, Rows: 24,
+    Output: screenWriter,
+    // Command: []string{"tmux", "new-session"}, // optional literal argv
+})
+if err != nil {
+    return err
+}
+defer session.Close()
+if _, err := io.WriteString(session, "echo hello\n"); err != nil {
+    return err
+}
+if err := session.Resize(100, 30); err != nil {
+    return err
+}
+// Wait for remote exit, context cancellation, or Close from another goroutine.
+code, err := session.Wait()
+```
+
+`mosh.Start(ctx, sshConn, config)` accepts an existing dedicated authenticated
+`*ssh.Client`. It takes ownership and closes that SSH connection before returning,
+including on failure; the resulting terminal uses UDP. `mosh.Dial` also closes
+its bootstrap SSH connection. Supply authentication and host-key verification
+explicitly through `ssh.ClientConfig`.
+
+`mosh.Session` provides concurrent-safe `Write`, `Resize`, `Done`, `Wait`, and
+idempotent `Close`. Writes copy and queue input with bounded backpressure;
+resizes are asynchronous and coalesce. The library does not inspect stdin,
+change local terminal modes, register signal handlers, or interpret the CLI's
+Ctrl-^ `.` escape. Send unmodified arrows using application-mode SS3 sequences.
+Mosh has no stdin EOF operation; an empty write does not close remote input.
+
+`Output` receives ANSI screen updates through an `io.Writer`; nil discards them.
+The writer must return promptly, and the application must unblock a blocked
+writer before waiting for shutdown. The library does not close the writer.
+Use a synchronized writer for concurrent reads, or inspect captured output after
+`Done` or `Wait`. Standard Mosh peers return zero on clean shutdown; two Lite
+peers also transmit the remote exit status. Cancellation returns the context
+error, and `Close` allows up to three seconds for protocol shutdown.
 
 ### Usage
 
@@ -158,8 +276,8 @@ $ sshd-lite --help
   --verbose, -v                 verbose logs
   --quiet, -q                   no logs
   --sftp, -s                    enable the SFTP subsystem (disabled by default)
-  --mosh                        enable Mosh on the same UDP port (five-minute idle timeout)
   --tcp-forwarding, -t          enable TCP forwarding (both local and reverse; disabled by default)
+  --mosh                        enable Mosh on the same UDP port (five-minute idle timeout)
   --version                     display version
   --help                        display help
 

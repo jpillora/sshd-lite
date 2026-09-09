@@ -1,62 +1,45 @@
-package client
+package mosh
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
-	"net"
 	"os"
-	"strconv"
+	"sync/atomic"
 	"time"
 
-	"github.com/jpillora/sshd-lite/internal/mosh"
+	"github.com/jpillora/sshd-lite/internal/termio"
 	"github.com/muesli/cancelreader"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 )
 
-func runMosh(ctx context.Context, conn *ssh.Client, stdin *os.File, stdout io.Writer) (int, error) {
-	cols, rows := terminalSize(stdin)
-	request := mosh.Request{Term: os.Getenv("TERM"), Cols: uint16(cols), Rows: uint16(rows)}
-	payload, _ := json.Marshal(request)
-	// Bound bootstrap independently of the lifetime of the UDP session.
-	timer := time.AfterFunc(10*time.Second, func() { conn.Close() })
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
-	ok, reply, err := conn.SendRequest(mosh.RequestName, true, payload)
-	timer.Stop()
-	stop()
-	if err != nil {
-		return 0, err
-	}
-	if !ok {
-		return 0, fmt.Errorf("server rejected Mosh; enable --mosh on sshd-lite")
-	}
-	var credentials mosh.Credentials
-	if err := json.Unmarshal(reply, &credentials); err != nil {
-		return 0, err
-	}
-	// Use the actual SSH peer, avoiding DNS resolving differently for UDP.
-	host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
-	if err != nil {
-		return 0, err
-	}
-	conn.Close()
-	udp, err := (&net.Dialer{}).DialContext(ctx, "udp", net.JoinHostPort(host, strconv.Itoa(credentials.Port)))
-	if err != nil {
-		return 0, err
-	}
-	defer udp.Close()
+// Run serves an interactive local terminal over a dedicated SSH connection.
+// It owns conn, restores terminal modes on exit, and handles Ctrl-^ . locally.
+func Run(ctx context.Context, conn *ssh.Client, stdin *os.File, stdout io.Writer, config ClientConfig) (int, error) {
+	defer conn.Close()
+	cols, rows := termio.Size(stdin)
 	if term.IsTerminal(int(stdin.Fd())) {
-		restore, err := rawTerminal(stdin)
+		restore, err := termio.Raw(stdin)
 		if err != nil {
 			return 0, err
 		}
 		defer restore()
+		// Isolate the remote screen from local shell contents, and restore the
+		// local display as well as termios when the Mosh session ends.
+		if _, err := io.WriteString(stdout, "\x1b[?1049h\x1b[?1h\x1b[0m\x1b[H\x1b[2J"); err != nil {
+			return 0, err
+		}
+		defer io.WriteString(stdout, "\x1b[?1l\x1b[0m\x1b[?5l\x1b[?25h\x1b[?1000l\x1b[?1001l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1049l")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	input := make(chan []byte, 16)
+	config.Term, config.Columns, config.Rows, config.Output = os.Getenv("TERM"), cols, rows, stdout
+	session, err := Start(ctx, conn, config)
+	if err != nil {
+		return 0, err
+	}
+	defer session.Close()
 	var source io.Reader = stdin
 	if info, statErr := stdin.Stat(); statErr == nil && (info.Mode().IsRegular() || (info.Mode()&os.ModeCharDevice != 0 && !term.IsTerminal(int(stdin.Fd())))) {
 		// Regular files and /dev/null cannot be registered with epoll. Their reads
@@ -68,6 +51,7 @@ func runMosh(ctx context.Context, conn *ssh.Client, stdin *os.File, stdout io.Wr
 		return 0, err
 	}
 	readDone := make(chan struct{})
+	var escaped atomic.Bool
 	defer func() {
 		cancel()
 		if reader.Cancel() {
@@ -84,7 +68,6 @@ func runMosh(ctx context.Context, conn *ssh.Client, stdin *os.File, stdout io.Wr
 	}()
 	go func() {
 		defer close(readDone)
-		defer close(input)
 		b := make([]byte, 4096)
 		escape := false
 		for {
@@ -95,6 +78,7 @@ func runMosh(ctx context.Context, conn *ssh.Client, stdin *os.File, stdout io.Wr
 					if escape {
 						escape = false
 						if key == '.' {
+							escaped.Store(true)
 							cancel()
 							return
 						}
@@ -108,9 +92,7 @@ func runMosh(ctx context.Context, conn *ssh.Client, stdin *os.File, stdout io.Wr
 					}
 					keys = append(keys, key)
 				}
-				select {
-				case input <- keys:
-				case <-ctx.Done():
+				if _, err := session.Write(keys); err != nil {
 					return
 				}
 			}
@@ -119,14 +101,11 @@ func runMosh(ctx context.Context, conn *ssh.Client, stdin *os.File, stdout io.Wr
 			}
 		}
 	}()
-	sizes := make(chan mosh.Request, 1)
-	stopResize := watchResize(ctx, stdin, func(cols, rows int) {
-		select {
-		case <-sizes:
-		default:
-		}
-		sizes <- mosh.Request{Cols: uint16(cols), Rows: uint16(rows)}
-	})
+	stopResize := termio.WatchResize(ctx, stdin, func(cols, rows int) { _ = session.Resize(cols, rows) })
 	defer stopResize()
-	return mosh.RunClient(ctx, udp, credentials.Key, input, sizes, stdout)
+	code, err := session.Wait()
+	if escaped.Load() && errors.Is(err, context.Canceled) {
+		return 0, nil
+	}
+	return code, err
 }
