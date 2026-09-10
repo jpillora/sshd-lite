@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -41,7 +42,7 @@ func TestServerLogsResolvedWorkDirAndSSHListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(logs.String(), "Work directory: "+dir) {
+	if !strings.Contains(logs.String(), "msg="+strconv.Quote("Work directory: "+dir)) {
 		t.Fatalf("work directory log missing: %s", logs.String())
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

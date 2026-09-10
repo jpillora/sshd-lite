@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -168,8 +169,10 @@ func TestRootedSFTPHandleMetadataSurvivesRenameAndReplacement(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(rootDir, "renamed")); err != nil || string(data) != "orig" {
 		t.Fatalf("renamed open file = %q, %v", data, err)
 	}
-	if info, err := os.Stat(filepath.Join(rootDir, "renamed")); err != nil || info.Mode().Perm() != 0o640 {
-		t.Fatalf("renamed open file mode = %v, %v", info, err)
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(filepath.Join(rootDir, "renamed")); err != nil || info.Mode().Perm() != 0o640 {
+			t.Fatalf("renamed open file mode = %v, %v", info, err)
+		}
 	}
 	if data, err := os.ReadFile(filepath.Join(rootDir, "original")); err != nil || string(data) != "replacement" {
 		t.Fatalf("replacement file was changed = %q, %v", data, err)
