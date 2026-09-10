@@ -127,9 +127,13 @@ Open both TCP and UDP on the selected server port. Normal host-key verification 
 
 The follow-up uses tmux 3.4 as the receiving terminal, independently of the Go emulator used by the implementation. A separate remote tmux runs behind each Mosh connection. `TestMoshInActualTmuxTerminals` exercises Debian client → embedded server, built Lite client → Debian server, and Lite client → embedded server.
 
-All three pairings passed actual TTY checks, readline arrow editing, colored CJK and combining-character output, pane splitting/switching, PTY resizes to 73×19, 120×42 and 100×30, tmux history/copy mode, detach/reattach, normal exit and Ctrl-^ then `.`. The tests compare terminal settings before and after each session and check that the local screen is restored. These are automated Linux PTY/tmux tests, not a claim of testing every graphical terminal application.
+All three pairings passed actual TTY checks, readline arrow editing, colored CJK and combining-character output, pane splitting/switching, PTY resizes to 73×19, 120×42 and 100×30, tmux history/copy mode, detach/reattach, normal exit and Ctrl-^ then `.`. The tests compare terminal settings before and after each session and check that the local shell remains usable. sshd-lite does not clear or switch screens on connect; a remote full-screen application such as tmux can select and restore its own alternate screen, as it does over ordinary SSH. These are automated Linux PTY/tmux tests, not a claim of testing every graphical terminal application.
 
-This uncovered two client defects: the first display update could leave old local-shell text visible, and an intentional escape disconnect returned an error. The client now initializes and restores an alternate screen, renders the first received state in full, and treats its explicit escape as a successful disconnect.
+This uncovered two client defects: the first display update could leave stale
+cells visible, and an intentional escape disconnect returned an error. The
+client renders the first received state in full, restores terminal modes without
+eagerly clearing or switching screens on connect, and treats its explicit escape
+as a successful disconnect.
 
 A requested subagent review then confirmed two further defects:
 
@@ -174,7 +178,8 @@ The output writer belongs to the application and must return promptly;
 applications must unblock an arbitrary blocking writer before awaiting shutdown.
 Output is ANSI screen state, and Mosh has no stdin EOF operation. Pending resizes
 are asynchronous. Unmodified cursor keys use standard Mosh application-mode
-SS3 encoding. These contracts and an embedding example are documented in README.
+SS3 encoding. These contracts and an embedding example are documented in the
+[Mosh guide](mosh-guide.md).
 
 After the API refactor, the full repository suite passed with Debian integration
 dependencies required, including all three actual tmux pairings. The client and

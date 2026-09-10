@@ -26,7 +26,7 @@ func StartTerminalCommand(cfg *Config, remote, local net.Addr, term string, cols
 	if term == "" {
 		term = "xterm-256color"
 	}
-	if !cfg.IgnoreEnv {
+	if !cfg.NoClientEnv && !cfg.IgnoreEnv {
 		for _, kv := range extraEnv {
 			cmd.Env = appendEnv(cmd.Env, kv)
 		}

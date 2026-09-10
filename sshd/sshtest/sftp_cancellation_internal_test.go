@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jpillora/sftp"
 	"github.com/jpillora/sshd-lite/xssh"
-	"github.com/pkg/sftp"
 )
 
 func TestSFTPDownloadCancellationOutcomeIsAtomic(t *testing.T) {

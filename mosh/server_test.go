@@ -106,6 +106,50 @@ func TestMoshBootstrapValidationAndShutdown(t *testing.T) {
 	udp.Close()
 }
 
+func TestDisabledMoshBootstrapFailsPromptly(t *testing.T) {
+	server, err := sshd.NewServer(sshd.Config{AuthType: "user:pass", KeySeed: "mosh-disabled", KeySeedEC: true, LogQuiet: true, Attach: mosh.RejectAttach})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := listenMoshTest(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.StartWithContext(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	client := dialMoshTest(t, listener.Addr().String())
+	defer client.Close()
+	started := time.Now()
+	output, err := func() ([]byte, error) {
+		session, err := client.NewSession()
+		if err != nil {
+			return nil, err
+		}
+		defer session.Close()
+		return session.CombinedOutput("MOSH_SERVER_NETWORK_TMOUT=300 'mosh-server' new -s -c 256 -l LANG=C.UTF-8")
+	}()
+	if err == nil || !strings.Contains(string(output), "Mosh disabled") {
+		t.Fatalf("disabled bootstrap: output=%q err=%v", output, err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("disabled bootstrap took %s", elapsed)
+	}
+
+	ordinary, err := func() ([]byte, error) {
+		session, err := client.NewSession()
+		if err != nil {
+			return nil, err
+		}
+		defer session.Close()
+		return session.CombinedOutput("echo SSH_STILL_WORKS")
+	}()
+	if err != nil || strings.TrimSpace(string(ordinary)) != "SSH_STILL_WORKS" {
+		t.Fatalf("ordinary command: output=%q err=%v", ordinary, err)
+	}
+}
+
 func newMoshTestServer(t *testing.T) *sshd.Server {
 	t.Helper()
 	s, err := sshd.NewServer(sshd.Config{AuthType: "user:pass", KeySeed: "mosh-test", KeySeedEC: true, LogQuiet: true, Attach: mosh.Attach})

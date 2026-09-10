@@ -79,7 +79,7 @@ func executeSFTPOperation(ctx context.Context, e *Environment, clientName, opera
 	case <-ctx.Done():
 	}
 
-	// pkg/sftp Close interrupts outstanding requests. Close synchronously, then
+	// SFTP Close interrupts outstanding requests. Close synchronously, then
 	// join the one operation goroutine: the action never abandons goroutines it
 	// owns. Real controlled-transfer tests enforce the practical time bound.
 	closeErr := sftpClient.Close()

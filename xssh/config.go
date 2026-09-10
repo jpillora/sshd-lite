@@ -36,8 +36,12 @@ type Config struct {
 	Logger *slog.Logger
 	// KeepAlive interval in seconds. If > 0, sends periodic ping requests.
 	KeepAlive int
-	// IgnoreEnv if true, ignores environment variables from "env" requests.
+	// NoClientEnv ignores environment variables from client "env" requests.
 	// It has no bearing on the server's own environment; see NoInheritEnv.
+	NoClientEnv bool
+	// IgnoreEnv is retained for source compatibility.
+	//
+	// Deprecated: use NoClientEnv.
 	IgnoreEnv bool
 	// NoInheritEnv disables full process environment inheritance, retaining only
 	// essential shell variables. By default sessions inherit the entire process
@@ -67,6 +71,9 @@ type Config struct {
 	ExecHandler ExecHandler
 	// SFTP enables the SFTP subsystem handler.
 	SFTP bool
+	// SFTPWorkDir exposes WorkingDirectory as the virtual SFTP root. When false,
+	// WorkingDirectory only controls the initial relative-path directory.
+	SFTPWorkDir bool
 	// LocalForwarding enables direct-tcpip channel handling (client requests server to connect).
 	LocalForwarding bool
 	// RemoteForwarding enables tcpip-forward global request handling (client requests server to listen).

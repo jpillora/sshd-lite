@@ -31,6 +31,9 @@ without forcing duplicate implementations into a strict tree. In particular:
   the detached terminal adapter owns its independent terminal lifetime.
 - `internal/termio` owns local terminal modes and resize notifications.
 - `internal/sshconn` owns context-aware TCP dialing and SSH handshake deadlines.
+- `github.com/jpillora/sftp` is the public, history-preserving SFTP fork used by
+  both the server and test client. Its request server preserves open-handle
+  FSTAT/FSETSTAT semantics after rename or unlink.
 - `internal/mosh` owns UDP routing and session orchestration. `terminalIO` owns
   terminal pumps and response-pipe cancellation. Only the session loop mutates
   the display; it never reaches through the display into emulator internals.
@@ -77,7 +80,10 @@ with `go run ./example/mosh`.
 `TestSSHDependenciesExcludeMosh` and `TestMoshDependencyBoundary` guard both
 dependency directions. This is package dependency
 isolation within one Go module, not a separate module or build-tag variant. The
-default CLI supports both protocols and includes both implementations.
+default CLI supports both protocols and includes both implementations. When the
+binary starts without `--mosh`, it installs a Mosh-owned rejecting attachment so
+standard bootstrap commands fail promptly; SSH-only library users do not import
+or install that optional handler.
 
 # Test support
 

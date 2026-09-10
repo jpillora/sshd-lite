@@ -34,6 +34,7 @@ func (s *Server) computeSSHConfig() (*ssh.ServerConfig, error) {
 			s.config.WorkDir = w
 		}
 	}
+	s.infof("Work directory: %s", s.config.WorkDir)
 
 	var keyBytes []byte
 	if len(s.config.KeyBytes) > 0 {

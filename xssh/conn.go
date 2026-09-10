@@ -99,6 +99,7 @@ func NewConnChecked(sshConn ssh.Conn, channels <-chan ssh.NewChannel, requests <
 	if config.SFTP {
 		xc.subsystemHandlers[SFTPSubsystem] = NewSFTPHandler(SFTPConfig{
 			WorkDir: config.WorkingDirectory,
+			Rooted:  config.SFTPWorkDir,
 			Logger:  config.Logger,
 		})
 	}

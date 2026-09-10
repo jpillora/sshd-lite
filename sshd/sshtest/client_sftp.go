@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/jpillora/sftp"
 	"github.com/jpillora/sshd-lite/sshd/sshtest/scenario"
-	"github.com/pkg/sftp"
 )
 
 // SFTPClient owns one SFTP subsystem session. Upload and Download may be used
-// concurrently (the underlying pkg/sftp client supports concurrent requests).
+// concurrently (the underlying SFTP client supports concurrent requests).
 // Callers ordinarily close it after operations finish. Close atomically prevents
 // a pending Download from replacing its destination, then closes the underlying
 // session to interrupt in-flight requests. A Download already committing its
@@ -113,7 +113,7 @@ func (c *SFTPClient) Download(remotePath, localPath string) (retErr error) {
 		return fmt.Errorf("close completed remote download file %q: %w", remotePath, err)
 	}
 	// Close and the destination commit have one explicit winner. Do not hold
-	// lifecycleMu while doing protocol I/O: pkg/sftp Close may need those
+	// lifecycleMu while doing protocol I/O: SFTP Close may need those
 	// requests to unwind.
 	c.lifecycleMu.Lock()
 	if c.closed {
@@ -146,7 +146,7 @@ func replaceFile(source, destination string) error {
 
 // Close prevents future download commits and closes this SFTP subsystem
 // session. It is safe to call repeatedly. Close does not hold the lifecycle
-// mutex while pkg/sftp shuts down, so interrupted requests can unwind.
+// mutex while SFTP shuts down, so interrupted requests can unwind.
 func (c *SFTPClient) Close() error {
 	c.closeOnce.Do(func() {
 		c.lifecycleMu.Lock()

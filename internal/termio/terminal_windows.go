@@ -8,6 +8,8 @@ import (
 
 func OpenTTY() (*os.File, error) { return os.OpenFile("CONIN$", os.O_RDWR, 0) }
 
+func OpenTTYOutput() (*os.File, error) { return os.OpenFile("CONOUT$", os.O_WRONLY, 0) }
+
 func WatchResize(ctx context.Context, f *os.File, resize func(int, int)) func() {
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})

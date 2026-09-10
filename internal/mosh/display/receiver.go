@@ -36,7 +36,7 @@ func (s *Receiver) Apply(u *ssp.Update) ([]byte, error) {
 				if m.Width < 1 || m.Width > 1000 || m.Height < 1 || m.Height > 1000 || int64(m.Width)*int64(m.Height) > 100000 {
 					return nil, fmt.Errorf("invalid remote Screen size")
 				}
-				s.scratch.emu.Resize(int(m.Width), int(m.Height))
+				s.scratch.Resize(int(m.Width), int(m.Height))
 			}
 			s.scratch.Write(m.Hoststring)
 		}
@@ -47,7 +47,10 @@ func (s *Receiver) Apply(u *ssp.Update) ([]byte, error) {
 	if u.NewNum > s.latest {
 		old := s.states[s.latest]
 		if !s.initialized {
-			old = nil
+			// Render the initial state relative to a blank canvas of the remote
+			// size. Ordinary shells therefore do not clear the receiving terminal;
+			// a full-screen application can explicitly select its alternate screen.
+			old = Blank(next.cols, next.rows)
 			s.initialized = true
 		}
 		out = next.Diff(old)
@@ -62,11 +65,17 @@ func (s *Receiver) Apply(u *ssp.Update) ([]byte, error) {
 	// empty updates share a Snapshot and are charged once.
 	seen := make(map[*State]bool)
 	cells := 0
-	for _, state := range s.states {
-		if !seen[state] {
-			seen[state] = true
-			cells += len(state.cells)
+	var countState func(*State)
+	countState = func(state *State) {
+		if state == nil || seen[state] {
+			return
 		}
+		seen[state] = true
+		cells += len(state.cells)
+		countState(state.primary)
+	}
+	for _, state := range s.states {
+		countState(state)
 	}
 	if cells > 350000 {
 		return nil, fmt.Errorf("Mosh retained Screen limit exceeded")

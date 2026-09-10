@@ -55,13 +55,14 @@ func NewServer(c Config) (*Server, error) {
 	xc := &xssh.Config{
 		Logger:                 c.Logger,
 		KeepAlive:              c.KeepAlive,
-		IgnoreEnv:              c.IgnoreEnv,
+		NoClientEnv:            c.NoClientEnv || c.IgnoreEnv,
 		NoInheritEnv:           c.NoInheritEnv,
 		NoGlobalEnv:            c.NoGlobalEnv,
 		WorkingDirectory:       s.config.WorkDir,
 		Shell:                  s.config.Shell, // absolute path, resolved once by computeSSHConfig
 		Session:                true,
 		SFTP:                   c.SFTP,
+		SFTPWorkDir:            c.SFTPWorkDir,
 		LocalForwarding:        c.TCPForwarding,
 		RemoteForwarding:       c.TCPForwarding,
 		GlobalRequestHandlers:  make(map[string]xssh.GlobalRequestHandler),
@@ -80,6 +81,9 @@ func NewServer(c Config) (*Server, error) {
 	}
 	if c.SFTP {
 		s.infof("SFTP enabled")
+		if c.SFTPWorkDir {
+			s.infof("SFTP restricted to work directory")
+		}
 	}
 	// Handler conflicts were validated before any setup with side effects.
 	// Copy custom maps so xssh's per-connection registration and the caller's
@@ -165,7 +169,7 @@ func (s *Server) StartWithContext(ctx context.Context, l net.Listener) error {
 		}
 		cfg.ExecHandler = handler
 	}
-	s.infof("Listening on %s...", l.Addr())
+	s.infof("Listening on tcp://%s for ssh connections", l.Addr())
 	run.watch(ctx, func() { s.infof("Closing server") })
 
 	var acceptErr error

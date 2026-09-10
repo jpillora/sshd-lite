@@ -42,6 +42,7 @@ go run . --port 2222 user:pass        # Custom port
 go run . --keyseed test user:pass     # Seeded RSA key
 go run . --keyseed test --keyseed-ec user:pass  # Ed25519 key
 go run . --sftp user:pass             # Enable SFTP
+go run . --sftp --sftp-wd user:pass   # Confine SFTP to the work directory
 go run . --tcp-forwarding user:pass   # Enable TCP forwarding
 ```
 
@@ -86,7 +87,7 @@ The repository is a single Go module. There is no `go.work` and no nested
 ## Common Issues
 
 - **Ed25519 keys**: Use `ssh.MarshalPrivateKey` to serialize Ed25519 keys, not raw bytes.
-- **Work directory**: `sshd.NewServer` resolves an empty `Config.WorkDir` to the process working directory. Shells, exec commands, and high-level SFTP all use that directory.
+- **Work directory**: `sshd.NewServer` resolves an empty `Config.WorkDir` to the process working directory. Shells, exec commands, and high-level SFTP all start in that directory. `Config.SFTPWorkDir` (`--sftp-wd`) additionally exposes it as SFTP's virtual root.
 - **Authorized keys**: File authentication accepts unrestricted keys only. Any parsed entry with options rejects the whole file. The file is reloaded for every public-key authentication, and reload errors deny authentication until it is valid again.
 - **Auth argument parsing**: `Config.AuthType` is read as `user:pass` when it contains a colon, except for a drive-qualified path such as `C:\keys\authorized_keys`, which is always treated as a file path. Reading one as a credential pair would silently enable password authentication with the drive letter as the user.
 - **Programmatic keys**: `Config.AuthKeys` is mutually exclusive with `AuthType`; it accepts bare public keys and cannot express `authorized_keys` options, username bindings, or per-key restrictions.
@@ -94,7 +95,7 @@ The repository is a single Go module. There is no `go.work` and no nested
 - **Handler conflicts**: `sshd.NewServer` rejects custom handler names reserved by enabled built-ins. At the lower level, prefer `xssh.NewConnChecked` when configuration errors must be returned; `xssh.NewConn` panics on conflicts.
 - **Windows PTY**: The `winpty` package vendors its ConPTY implementation (`*_windows.go`, from `photostorm/pty`) instead of depending on that fork. The fork's `go.mod` declares itself as `github.com/creack/pty`, so consuming it needs a `replace`, and a `replace` outside the main module is ignored. Do not reintroduce the replace. Vetting the Windows build reports four pre-existing `unsafe.Pointer` findings in the vendored files.
 - **Port fallback**: With an empty port, the server tries 22 first and falls back to 2200.
-- **Session environment**: Sessions inherit the sshd-lite process environment by default. `Config.NoInheritEnv` (`--no-inherit-env`) limits process inheritance to `baseEnvNames` (`xssh/env_unix.go`, `xssh/env_windows.go`). On Unix, `/etc/environment`, when present, supplies defaults in either mode unless `Config.NoGlobalEnv` (`--no-global-env`) is set; inherited process values override them. The file contains literal `KEY=value` assignments with optional quotes/comments, not shell commands or variable expansion. Current `SSH_CLIENT`/`SSH_CONNECTION`, client `env` requests, and PTY `TERM` are applied afterward. `--noenv` separately ignores client-supplied variables.
+- **Session environment**: Sessions inherit the sshd-lite process environment by default. `Config.NoInheritEnv` (`--no-inherit-env`) limits process inheritance to `baseEnvNames` (`xssh/env_unix.go`, `xssh/env_windows.go`). On Unix, `/etc/environment`, when present, supplies defaults in either mode unless `Config.NoGlobalEnv` (`--no-global-env`) is set; inherited process values override them. The file contains literal `KEY=value` assignments with optional quotes/comments, not shell commands or variable expansion. Current `SSH_CLIENT`/`SSH_CONNECTION`, client `env` requests, and PTY `TERM` are applied afterward. `Config.NoClientEnv` (`--no-client-env`, with legacy `--noenv` accepted by the CLI) separately ignores client-supplied variables.
 - **`SSH_TTY`**: Not set. OpenSSH allocates the pty before forking, so it knows the slave name in time; `startPTY` allocates and starts in one step because the Windows ConPTY backend cannot separate them.
 - **Session teardown**: EOF on the client's stdin is not session cancellation, for interactive shells (`attachShell`) as well as exec (`copyCommandStdin`). Teardown is owned by the shell reaper, which also sends `exit-status`; closing the channel from the output-copy goroutine raced it and made every interactive session report 255.
 

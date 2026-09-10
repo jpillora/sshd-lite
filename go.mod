@@ -10,8 +10,8 @@ require (
 	github.com/charmbracelet/x/vt v0.0.0-20260906004030-3986e9119cf9
 	github.com/creack/pty v1.1.24
 	github.com/jpillora/jplog v1.0.2
+	github.com/jpillora/sftp v1.13.15
 	github.com/muesli/cancelreader v0.2.2
-	github.com/pkg/sftp v1.13.11
 	github.com/unixshells/mosh-go v0.5.2
 	golang.org/x/crypto v0.54.0
 	golang.org/x/term v0.45.0
@@ -38,7 +38,7 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/jpillora/opts v1.6.0
+	github.com/jpillora/opts v1.9.0
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

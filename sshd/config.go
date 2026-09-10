@@ -37,13 +37,20 @@ type Config struct {
 	// MaxPendingHandshakes is the maximum number of SSH handshakes allowed at
 	// once. Zero selects DefaultMaxPendingHandshakes; a negative value disables it.
 	MaxPendingHandshakes int  `opts:"name=max-pending-handshakes,help=maximum concurrent unauthenticated SSH handshakes (negative to disable)"`
-	IgnoreEnv            bool `opts:"name=noenv,help=ignore environment variables provided by the client"`
-	NoInheritEnv         bool `opts:"name=no-inherit-env,help=inherit only essential shell variables from the server process"`
-	NoGlobalEnv          bool `opts:"name=no-global-env,help=do not load /etc/environment for sessions"`
-	LogVerbose           bool `opts:"name=verbose,short=v,help=verbose logs"`
-	LogQuiet             bool `opts:"name=quiet,short=q,help=no logs"`
-	SFTP                 bool `opts:"short=s,help=enable the SFTP subsystem (disabled by default)"`
-	TCPForwarding        bool `opts:"name=tcp-forwarding,short=t,help=enable TCP forwarding (both local and reverse; disabled by default)"`
+	NoClientEnv          bool `opts:"name=no-client-env,help=ignore environment variables provided by the client"`
+	// IgnoreEnv is retained for source compatibility. New code should use
+	// NoClientEnv. The CLI accepts the old --noenv spelling by translating it
+	// before option parsing, so this field is not itself exposed as a flag.
+	//
+	// Deprecated: use NoClientEnv.
+	IgnoreEnv     bool `opts:"-"`
+	NoInheritEnv  bool `opts:"name=no-inherit-env,help=inherit only essential shell variables from the server process"`
+	NoGlobalEnv   bool `opts:"name=no-global-env,help=do not load /etc/environment for sessions"`
+	LogVerbose    bool `opts:"name=verbose,short=v,help=verbose logs"`
+	LogQuiet      bool `opts:"name=quiet,short=q,help=no logs"`
+	SFTP          bool `opts:"short=s,help=enable the SFTP subsystem (disabled by default)"`
+	SFTPWorkDir   bool `opts:"name=sftp-wd,help=restrict SFTP to the configured workdir"`
+	TCPForwarding bool `opts:"name=tcp-forwarding,short=t,help=enable TCP forwarding (both local and reverse; disabled by default)"`
 	// Attach optionally starts a companion listener before accepting SSH.
 	// It runs once per listener and returns that listener's exec handler.
 	// The returned closer, if any, is closed on attachment failure or when the

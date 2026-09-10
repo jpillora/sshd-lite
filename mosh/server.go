@@ -24,6 +24,28 @@ func Attach(ctx context.Context, addr net.Addr) (xssh.ExecHandler, io.Closer, er
 	return bootstrapHandler(server), server, nil
 }
 
+// RejectAttach installs a bootstrap handler which reports that embedded Mosh
+// is disabled without opening a UDP listener. The sshd-lite binary uses it for
+// listeners started without --mosh; SSH-only library users need not link Mosh.
+func RejectAttach(context.Context, net.Addr) (xssh.ExecHandler, io.Closer, error) {
+	return func(sess *xssh.Session, command string) (bool, error) {
+		_, handled, _ := protocol.ParseBootstrap(command)
+		if !handled {
+			return false, nil
+		}
+		defer sess.Channel.Close()
+		fmt.Fprintln(sess.Channel.Stderr(), "sshd-lite: Mosh disabled; restart the server with --mosh")
+		exitStatus(sess, 1)
+		return true, nil
+	}, nil, nil
+}
+
+func exitStatus(sess *xssh.Session, code uint32) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, code)
+	_, _ = sess.Channel.SendRequest("exit-status", false, b)
+}
+
 func bootstrapHandler(server *protocol.Server) xssh.ExecHandler {
 	return func(sess *xssh.Session, command string) (bool, error) {
 		bootstrap, handled, err := protocol.ParseBootstrap(command)
@@ -31,11 +53,7 @@ func bootstrapHandler(server *protocol.Server) xssh.ExecHandler {
 			return false, nil
 		}
 		defer sess.Channel.Close()
-		exit := func(code uint32) {
-			b := make([]byte, 4)
-			binary.BigEndian.PutUint32(b, code)
-			_, _ = sess.Channel.SendRequest("exit-status", false, b)
-		}
+		exit := func(code uint32) { exitStatus(sess, code) }
 		if err == nil {
 			err = bootstrap.ValidateListener(server.Port(), sess.Conn().LocalAddr())
 		}
@@ -65,7 +83,7 @@ func bootstrapHandler(server *protocol.Server) xssh.ExecHandler {
 		cfg := sess.Config()
 		launch := xssh.Config{
 			Shell: cfg.Shell, WorkingDirectory: cfg.WorkingDirectory,
-			IgnoreEnv: cfg.IgnoreEnv, NoInheritEnv: cfg.NoInheritEnv, NoGlobalEnv: cfg.NoGlobalEnv,
+			NoClientEnv: cfg.NoClientEnv || cfg.IgnoreEnv, NoInheritEnv: cfg.NoInheritEnv, NoGlobalEnv: cfg.NoGlobalEnv,
 		}
 		remote, local := sess.Conn().RemoteAddr(), sess.Conn().LocalAddr()
 		credentials, revoke, err := server.Issue(bootstrap.Request, func() (protocol.Terminal, error) {

@@ -83,6 +83,13 @@ func ServerWithSFTP(enabled bool) ServerOption {
 	}
 }
 
+// ServerWithSFTPWorkDir restricts SFTP to the configured server work directory.
+func ServerWithSFTPWorkDir(enabled bool) ServerOption {
+	return func(c *serverConfig) {
+		c.SFTPWorkDir = enabled
+	}
+}
+
 // ServerWithTCPForwarding enables or disables TCP forwarding.
 func ServerWithTCPForwarding(enabled bool) ServerOption {
 	return func(c *serverConfig) {

@@ -2,11 +2,81 @@ package display
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jpillora/sshd-lite/internal/mosh/ssp"
 	wire "github.com/unixshells/mosh-go"
 )
+
+func TestReceiverInitialRenderDoesNotClearOrSwitchScreens(t *testing.T) {
+	s := NewReceiver(20, 4)
+	defer s.Close()
+	out, err := s.Apply(&ssp.Update{
+		OldNum: 0,
+		NewNum: 1,
+		Diff: wire.MarshalHostMessage([]wire.HostInstruction{{
+			Hoststring: []byte("prompt"),
+			EchoAckNum: -1,
+		}}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"\x1b[2J", "\x1b[?1049h", "\x1b[?1049l"} {
+		if strings.Contains(string(out), forbidden) {
+			t.Fatalf("initial render contains screen-changing sequence %q: %q", forbidden, out)
+		}
+	}
+	if !strings.Contains(string(out), "prompt") {
+		t.Fatalf("initial render omitted remote contents: %q", out)
+	}
+}
+
+func TestReceiverPropagatesApplicationAlternateScreen(t *testing.T) {
+	s := NewReceiver(20, 4)
+	defer s.Close()
+	apply := func(old, next uint64, text string) string {
+		t.Helper()
+		out, err := s.Apply(&ssp.Update{
+			OldNum: old,
+			NewNum: next,
+			Diff: wire.MarshalHostMessage([]wire.HostInstruction{{
+				Hoststring: []byte(text),
+				EchoAckNum: -1,
+			}}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	_ = apply(0, 1, "PRIMARY")
+	entered := apply(1, 2, "\x1b[?1049hALT")
+	if i, j := strings.Index(entered, "\x1b[?1049h"), strings.LastIndex(entered, "ALT"); i < 0 || j < 0 || i > j {
+		t.Fatalf("alternate screen was not selected before rendering: %q", entered)
+	}
+	if _, err := s.Apply(&ssp.Update{
+		OldNum: 2,
+		NewNum: 3,
+		Diff: wire.MarshalHostMessage([]wire.HostInstruction{{
+			Width:      30,
+			Height:     6,
+			EchoAckNum: -1,
+		}}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	left := apply(3, 4, "\x1b[?1049lAFTER")
+	if !strings.Contains(left, "\x1b[?1049l") {
+		t.Fatalf("alternate screen restoration did not leave alternate mode: %q", left)
+	}
+	for _, overwritten := range []string{"PRIMARY", "AFTER", "\x1b[1;"} {
+		if strings.Contains(left, overwritten) {
+			t.Fatalf("alternate screen restoration painted %q over local primary: %q", overwritten, left)
+		}
+	}
+}
 
 func TestScreenOldBaseAndUnicode(t *testing.T) {
 	s := NewReceiver(20, 4)

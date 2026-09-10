@@ -198,7 +198,7 @@ func handleEnv(sess *Session, req *Request) error {
 	}
 	kv := e.Name + "=" + e.Value
 	debugf(sess, "env: %s", kv)
-	if !sess.Config().IgnoreEnv {
+	if !sess.Config().NoClientEnv && !sess.Config().IgnoreEnv {
 		sess.Env = appendEnv(sess.Env, kv)
 	}
 	return nil

@@ -151,6 +151,69 @@ func TestSFTPDisabledAndActionValidation(t *testing.T) {
 	}
 }
 
+func TestSFTPWorkDirConfinement(t *testing.T) {
+	parent := t.TempDir()
+	workDir := filepath.Join(parent, "root")
+	outsideDir := filepath.Join(parent, "outside")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outsideDir, "secret")
+	if err := os.WriteFile(secret, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "inside"), []byte("inside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	symlinkAvailable := os.Symlink(outsideDir, filepath.Join(workDir, "escape")) == nil
+
+	env := sshtest.New(t).
+		WithServer(
+			sshtest.ServerWithSFTP(true),
+			sshtest.ServerWithSFTPWorkDir(true),
+			sshtest.ServerWithWorkDir(workDir),
+		).
+		WithClient("test", sshtest.ClientWithKeySeed("test")).
+		Start()
+	t.Cleanup(env.Stop)
+	client := env.Client("test")
+	if err := client.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	sftpClient, err := client.SFTP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sftpClient.Close()
+
+	download := filepath.Join(t.TempDir(), "download")
+	if err := sftpClient.Download("/inside", download); err != nil {
+		t.Fatalf("absolute virtual path: %v", err)
+	}
+	assertFileBytes(t, download, []byte("inside"))
+	for _, remote := range []string{"../outside/secret", "../../outside/secret", filepath.ToSlash(secret)} {
+		if err := sftpClient.Download(remote, download); err == nil {
+			t.Fatalf("escaped download %q succeeded", remote)
+		}
+	}
+	if symlinkAvailable {
+		if err := sftpClient.Download("escape/secret", download); err == nil {
+			t.Fatal("download through outside symlink succeeded")
+		}
+		local := filepath.Join(t.TempDir(), "upload")
+		if err := os.WriteFile(local, []byte("overwrite"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := sftpClient.Upload(local, "escape/secret"); err == nil {
+			t.Fatal("upload through outside symlink succeeded")
+		}
+		assertFileBytes(t, secret, []byte("outside"))
+	}
+}
+
 func TestSFTPActionSpecs(t *testing.T) {
 	upload := scenario.SFTPUploadSpec("local-a", "remote-a")
 	if upload.Type != scenario.ActionSFTPUpload || upload.LocalPath() != "local-a" || upload.RemotePath() != "remote-a" {

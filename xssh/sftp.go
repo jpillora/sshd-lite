@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/pkg/sftp"
+	"github.com/jpillora/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -14,6 +14,9 @@ import (
 type SFTPConfig struct {
 	// WorkDir is the working directory for SFTP. Defaults to user home.
 	WorkDir string
+	// Rooted exposes WorkDir as the virtual filesystem root instead of merely
+	// using it to resolve relative paths.
+	Rooted bool
 	// Logger enables debug logger
 	Logger *slog.Logger
 }
@@ -33,7 +36,6 @@ func NewSFTPHandler(cfg SFTPConfig) SubsystemHandler {
 // startSFTPServer starts the SFTP server for the given session.
 func startSFTPServer(sess *Session, cfg SFTPConfig) {
 	defer sess.Channel.Close()
-	opts := []sftp.ServerOption{}
 	// Set working directory
 	workDir := cfg.WorkDir
 	if workDir == "" {
@@ -41,11 +43,9 @@ func startSFTPServer(sess *Session, cfg SFTPConfig) {
 			workDir = d
 		}
 	}
+	opts := []sftp.ServerOption{}
 	if workDir != "" {
-		opts = append(
-			opts,
-			sftp.WithServerWorkingDirectory(workDir),
-		)
+		opts = append(opts, sftp.WithServerWorkingDirectory(workDir))
 	}
 	// Enable debug if logger is set
 	debug := func(msg string, args ...any) {
@@ -68,13 +68,30 @@ func startSFTPServer(sess *Session, cfg SFTPConfig) {
 	defer func() {
 		sess.Channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{exitStatus}))
 	}()
-	sftpServer, err := sftp.NewServer(sess.Channel, opts...)
-	if err != nil {
-		debug("Failed to create SFTP server", "error", err)
-		exitStatus = 1
-		return
+	var serve func() error
+	var closeRoot func() error
+	if cfg.Rooted {
+		rooted, err := newRootedSFTPServer(sess.Channel, workDir)
+		if err != nil {
+			debug("Failed to create rooted SFTP server", "error", err)
+			exitStatus = 1
+			return
+		}
+		serve = rooted.Serve
+		closeRoot = rooted.CloseRoot
+	} else {
+		sftpServer, err := sftp.NewServer(sess.Channel, opts...)
+		if err != nil {
+			debug("Failed to create SFTP server", "error", err)
+			exitStatus = 1
+			return
+		}
+		serve = sftpServer.Serve
 	}
-	if err := sftpServer.Serve(); err != nil && err != io.EOF {
+	if closeRoot != nil {
+		defer closeRoot()
+	}
+	if err := serve(); err != nil && err != io.EOF {
 		debug("SFTP server error", "error", err)
 		exitStatus = 1
 	} else {
