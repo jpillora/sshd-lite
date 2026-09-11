@@ -223,7 +223,10 @@ func TestMoshPublicAPIOutputError(t *testing.T) {
 	want := errors.New("application output stopped")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, err := mosh.Dial(ctx, address, auth, mosh.ClientConfig{Command: []string{"printf", "OUTPUT"}, Output: failedOutput{want}})
+	// Keep the process alive after writing so PTY teardown cannot race output
+	// delivery and turn this into an ordinary successful remote shutdown.
+	command := []string{"/bin/sh", "-c", "printf OUTPUT; exec cat"}
+	s, err := mosh.Dial(ctx, address, auth, mosh.ClientConfig{Command: command, Output: failedOutput{want}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +423,10 @@ func TestMoshPublicAPIShortOutput(t *testing.T) {
 	address, auth, _ := apiServer(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, err := mosh.Dial(ctx, address, auth, mosh.ClientConfig{Command: []string{"printf", "OUTPUT"}, Output: shortOutput{}})
+	// Keep the process alive until the client observes the short write; otherwise
+	// fast PTY teardown can discard its final output on some platforms.
+	command := []string{"/bin/sh", "-c", "printf OUTPUT; exec cat"}
+	s, err := mosh.Dial(ctx, address, auth, mosh.ClientConfig{Command: command, Output: shortOutput{}})
 	if err != nil {
 		t.Fatal(err)
 	}
