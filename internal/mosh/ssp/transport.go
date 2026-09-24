@@ -43,6 +43,7 @@ type Transport struct {
 	sentNum        uint64 // newest state we've sent (new_num)
 	ackedByRemote  uint64 // newest state the remote has acknowledged
 	pendingDiff    []byte // diff payload waiting to be sent
+	pendingSet     bool   // an empty diff can supersede an unacknowledged state
 	diffSent       bool   // true = pendingDiff has been sent at least once
 	diffOldNum     uint64 // locked oldNum for all diffs until base advances
 	hasPendingBase bool   // true = diffOldNum is locked
@@ -153,9 +154,8 @@ func (t *Transport) SetPending(diff []byte) {
 		t.mu.Unlock()
 		return
 	}
-	if len(diff) > 0 {
-		t.diffSent = false
-	}
+	t.pendingSet = true
+	t.diffSent = false
 	t.pendingDiff = diff
 	t.mu.Unlock()
 }
@@ -169,7 +169,7 @@ func (t *Transport) Tick() [][]byte {
 	now := time.Now()
 
 	// Decide if we should send.
-	haveDiff := len(t.pendingDiff) > 0
+	haveDiff := t.pendingSet
 	haveNewDiff := haveDiff && !t.diffSent
 	if t.shutdown && t.sentNum != shutdownNum {
 		haveNewDiff = true

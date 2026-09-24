@@ -122,8 +122,9 @@ func (t *Transport) RecvUpdate(data []byte) (update *Update, fresh bool) {
 	// Process ack from remote.
 	if ti.AckNum > t.ackedByRemote && ti.AckNum <= t.sentNum {
 		t.ackedByRemote = ti.AckNum
-		if t.ackedByRemote >= t.sentNum && t.pendingDiff != nil {
+		if t.ackedByRemote >= t.sentNum && t.pendingSet {
 			t.pendingDiff = nil
+			t.pendingSet = false
 			t.diffSent = false
 			t.hasPendingBase = false
 		}

@@ -1,7 +1,10 @@
 package mosh
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jpillora/sshd-lite/internal/mosh/ssp"
 	wire "github.com/unixshells/mosh-go"
 )
 
@@ -94,6 +98,67 @@ func receive(t *testing.T, c *net.UDPConn, tr *wire.Transport) {
 	tr.Recv(b[:n])
 }
 
+func receiveUpdate(t *testing.T, c *net.UDPConn, tr *ssp.Transport) *ssp.Update {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	b := make([]byte, 65536)
+	for {
+		if err := c.SetReadDeadline(deadline); err != nil {
+			t.Fatal(err)
+		}
+		n, err := c.Read(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if update, _ := tr.RecvUpdate(b[:n]); update != nil && len(update.Diff) > 0 {
+			return update
+		}
+	}
+}
+
+func hoststring(t *testing.T, update *ssp.Update) string {
+	t.Helper()
+	instructions, err := wire.UnmarshalHostMessage(update.Diff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for _, instruction := range instructions {
+		b.Write(instruction.Hoststring)
+	}
+	return b.String()
+}
+
+func inputDatagram(t *testing.T, ocb *wire.OCB, seq, state uint64, diff []byte) []byte {
+	t.Helper()
+	ti := wire.TransportInstruction{
+		ProtocolVersion: 2,
+		OldNum:          0,
+		NewNum:          state,
+		ThrowawayNum:    0,
+		Diff:            diff,
+	}
+	var compressed bytes.Buffer
+	zw := zlib.NewWriter(&compressed)
+	if _, err := zw.Write(ti.Marshal()); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f := wire.Fragment{ID: state, Final: true, Payload: compressed.Bytes()}
+	fragment := f.Marshal()
+	plain := make([]byte, 4+len(fragment))
+	binary.BigEndian.PutUint16(plain[0:], uint16(time.Now().UnixMilli()))
+	binary.BigEndian.PutUint16(plain[2:], 0xffff)
+	copy(plain[4:], fragment)
+	var nonce [12]byte
+	binary.BigEndian.PutUint64(nonce[4:], seq)
+	datagram := make([]byte, 8)
+	binary.BigEndian.PutUint64(datagram, seq)
+	return append(datagram, ocb.Encrypt(nonce[:], plain)...)
+}
+
 func TestUnusedKeyExpiresWithoutStartingShell(t *testing.T) {
 	s := testServer(t, 100*time.Millisecond)
 	var starts atomic.Int32
@@ -104,6 +169,83 @@ func TestUnusedKeyExpiresWithoutStartingShell(t *testing.T) {
 	waitFor(t, func() bool { return sessionCount(s) == 0 })
 	if starts.Load() != 0 {
 		t.Fatal("unused key started a shell")
+	}
+}
+
+func TestEmptyInputStateDoesNotGenerateEchoUpdate(t *testing.T) {
+	s := testServer(t, 3*time.Second)
+	e := newEcho()
+	credentials, _, err := s.Issue(Request{Cols: 80, Rows: 24}, func() (Terminal, error) { return e, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ocb, err := wire.NewOCBFromBase64(credentials.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := udpClient(t, s)
+	if _, err := c.Write(inputDatagram(t, ocb, 1, 1, nil)); err != nil {
+		t.Fatal(err)
+	}
+	client := wire.NewTransport(ocb, false)
+	deadline := time.Now().Add(150 * time.Millisecond)
+	buf := make([]byte, 65536)
+	for {
+		if err := c.SetReadDeadline(deadline); err != nil {
+			t.Fatal(err)
+		}
+		n, err := c.Read(buf)
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diff := client.Recv(buf[:n]); len(diff) != 0 {
+			t.Fatalf("empty input state generated %d-byte terminal update", len(diff))
+		}
+	}
+}
+
+func TestScreenUpdatesDoNotWaitForAcknowledgement(t *testing.T) {
+	s := testServer(t, 3*time.Second)
+	e := newEcho()
+	credentials, _, err := s.Issue(Request{Cols: 80, Rows: 24}, func() (Terminal, error) { return e, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ocb, err := wire.NewOCBFromBase64(credentials.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := udpClient(t, s)
+	if _, err := c.Write(inputDatagram(t, ocb, 1, 1, nil)); err != nil {
+		t.Fatal(err)
+	}
+	client := ssp.NewTransport(ocb, false)
+	if _, err := e.Write([]byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	first := receiveUpdate(t, c, client)
+	if text := hoststring(t, first); !strings.Contains(text, "first") {
+		t.Fatalf("first update = %q", text)
+	}
+
+	// Deliberately send no acknowledgement for first. A mobile peer may batch
+	// ACKs for seconds; newer terminal state must still be sent promptly from
+	// the last confirmed base.
+	if _, err := e.Write([]byte("second")); err != nil {
+		t.Fatal(err)
+	}
+	second := receiveUpdate(t, c, client)
+	if second.NewNum <= first.NewNum {
+		t.Fatalf("new state %d did not supersede unacknowledged state %d", second.NewNum, first.NewNum)
+	}
+	if second.OldNum != first.OldNum {
+		t.Fatalf("superseding state changed unacknowledged base from %d to %d", first.OldNum, second.OldNum)
+	}
+	if text := hoststring(t, second); !strings.Contains(text, "firstsecond") {
+		t.Fatalf("superseding update = %q", text)
 	}
 }
 

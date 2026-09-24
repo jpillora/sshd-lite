@@ -86,6 +86,28 @@ func TestFreshnessDoesNotDependOnClockAdvancing(t *testing.T) {
 		t.Fatal("test did not exercise a non-advancing receive timestamp")
 	}
 }
+
+func TestEmptyDiffCanSupersedeUnacknowledgedState(t *testing.T) {
+	a, b := transports(t)
+	a.SetPending([]byte("visible"))
+	first := transfer(a, b)
+	if first == nil || first.NewNum != 1 {
+		t.Fatal("missing first state")
+	}
+
+	// Returning to the confirmed state has an empty diff, but still needs a new
+	// state number so the receiver can replace the speculative first state.
+	a.SetPending(nil)
+	second := transfer(a, b)
+	if second == nil || second.NewNum != 2 || second.OldNum != 0 || len(second.Diff) != 0 {
+		t.Fatalf("empty superseding state = %#v", second)
+	}
+	transfer(b, a)
+	if a.AckedByRemote() != 2 || a.pendingSet {
+		t.Fatal("empty superseding state was not acknowledged")
+	}
+}
+
 func TestLongSessionStatePruningAndShutdown(t *testing.T) {
 	a, b := transports(t)
 	for i := 1; i <= 1500; i++ {

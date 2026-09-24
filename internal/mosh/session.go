@@ -17,12 +17,13 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 	inputs := newInputStates()
 	var cursorInput display.CursorKeys
 	var echoNum uint64
+	var baseEchoNum uint64
+	var sentEchoNum uint64
 	type echoPending struct {
 		num uint64
 		at  time.Time
 	}
 	var echoes []echoPending
-	echoReady := false
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	var terminal *terminalIO
@@ -95,11 +96,17 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 			if err != nil {
 				return
 			}
-			if len(echoes) >= 1024 {
-				return
-			}
-			if update.NewNum > echoNum {
-				echoes = append(echoes, echoPending{update.NewNum, time.Now().Add(50 * time.Millisecond)})
+			// Echo acknowledgements confirm that user actions have reached the
+			// terminal. Standard peers also advance SSP state for empty ACKs; do
+			// not turn those into terminal updates or the peers continuously
+			// stimulate each other's active send timers.
+			if len(instructions) > 0 {
+				if len(echoes) >= 1024 {
+					return
+				}
+				if update.NewNum > echoNum {
+					echoes = append(echoes, echoPending{update.NewNum, time.Now().Add(50 * time.Millisecond)})
+				}
 			}
 			for _, instruction := range instructions {
 				keys := cursorInput.Translate(instruction.Keys, emu.ApplicationCursor())
@@ -148,6 +155,7 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 			if acked && sent != nil {
 				base = sent
 				sent = nil
+				baseEchoNum = sentEchoNum
 			}
 			if tr.ShutdownAcked() {
 				return
@@ -158,26 +166,23 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 			for len(echoes) > 0 && !time.Now().Before(echoes[0].at) {
 				echoNum = max(echoNum, echoes[0].num)
 				echoes = echoes[1:]
-				echoReady = true
-			}
-			if echoReady && acked {
-				dirty = true
 			}
 			// Allow the PTY reader to drain before sending the final screen and exit.
-			if !exitSent && acked && (dirty || (ended && output == nil)) {
+			if !exitSent && (dirty || echoNum > sentEchoNum || (ended && output == nil)) {
 				var instructions []wire.HostInstruction
-				if dirty {
-					sent = emu.Snapshot()
-					instructions = append(instructions, wire.HostInstruction{Hoststring: sent.Diff(base), EchoAckNum: -1})
+				sent = emu.Snapshot()
+				hoststring := sent.Diff(base)
+				if len(hoststring) > 0 {
+					instructions = append(instructions, wire.HostInstruction{Hoststring: hoststring, EchoAckNum: -1})
 					if sent.Columns() != base.Columns() || sent.Rows() != base.Rows() {
 						instructions = append([]wire.HostInstruction{{Width: int32(sent.Columns()), Height: int32(sent.Rows()), EchoAckNum: -1}}, instructions...)
 					}
-					if echoReady {
-						instructions = append(instructions, wire.HostInstruction{EchoAckNum: int64(echoNum)})
-						echoReady = false
-					}
-					dirty = false
 				}
+				if echoNum > baseEchoNum {
+					instructions = append(instructions, wire.HostInstruction{EchoAckNum: int64(echoNum)})
+				}
+				sentEchoNum = echoNum
+				dirty = false
 				if ended && output == nil {
 					b := make([]byte, 4)
 					binary.BigEndian.PutUint32(b, uint32(exitCode))
