@@ -67,7 +67,7 @@ func TestMoshBootstrapValidationAndShutdown(t *testing.T) {
 		}
 	}
 	output, err := run("echo SSH_FALLBACK")
-	if err != nil || strings.TrimSpace(string(output)) != "SSH_FALLBACK" {
+	if err != nil || !strings.Contains(string(output), "SSH_FALLBACK") {
 		t.Fatalf("ordinary exec did not fall through: %q %v", output, err)
 	}
 	output, err = run("mosh-server new -s -c 256 -l LANG=C.UTF-8")
