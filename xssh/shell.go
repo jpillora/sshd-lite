@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -13,8 +14,20 @@ import (
 
 // attachShell attaches a shell to the session
 func attachShell(sess *Session) error {
+	if err := attachPTYCommand(sess, nil); err != nil {
+		_ = sess.Channel.Close()
+		return err
+	}
+	return nil
+}
+
+// attachPTYCommand runs a shell or command through the session's PTY.
+func attachPTYCommand(sess *Session, command *string) error {
 	cfg := sess.Config()
 	shell := terminal.Command(cfg.Shell, nil)
+	if command != nil {
+		shell = exec.Command(cfg.Shell, commandFlag(cfg.Shell), *command)
+	}
 	var process *terminal.Process
 	if cfg.WorkingDirectory != "" {
 		shell.Dir = cfg.WorkingDirectory
@@ -60,7 +73,6 @@ func attachShell(sess *Session) error {
 	// start a shell for this channel's connection
 	shellf, err := terminal.Start(shell, initialSize)
 	if err != nil {
-		closeFunc()
 		return fmt.Errorf("could not start pty: %w", err)
 	}
 

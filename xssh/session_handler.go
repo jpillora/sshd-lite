@@ -55,6 +55,7 @@ func handlePtyReq(sess *Session, req *Request) error {
 		sess.Env = appendEnv(sess.Env, "TERM="+term)
 	}
 	queueResize(sess, ws)
+	sess.pty = true
 	debugf(sess, "PTY ready")
 	return nil
 }

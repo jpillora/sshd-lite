@@ -14,6 +14,7 @@ type Session struct {
 	done  chan struct{}
 	stop  sync.Once
 	tasks sync.WaitGroup
+	pty   bool
 	// Channel is the underlying SSH "session" channel.
 	Channel ssh.Channel
 	// Env contains environment variables for this session.

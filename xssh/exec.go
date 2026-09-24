@@ -25,6 +25,13 @@ func executeCommand(sess *Session, command string) {
 			return
 		}
 	}
+	if sess.pty {
+		if err := attachPTYCommand(sess, &command); err != nil {
+			commandSetupFailed(sess, "failed to start command in pty", err)
+			_ = sess.Channel.Close()
+		}
+		return
+	}
 	defer sess.Channel.Close()
 	cfg := sess.Config()
 

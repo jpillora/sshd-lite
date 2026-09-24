@@ -104,6 +104,42 @@ func TestExecStdin(t *testing.T) {
 	}
 }
 
+func TestExecWithRequestedPTY(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test command uses POSIX shell syntax")
+	}
+	client := startExecTestServer(t)
+	session, err := client.NewSession()
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	defer session.Close()
+	if err := session.RequestPty("xterm-256color", 24, 80, ssh.TerminalModes{}); err != nil {
+		t.Fatalf("request pty: %v", err)
+	}
+	session.Stdin = strings.NewReader("hello\n")
+	out, err := session.CombinedOutput("test -t 0 && test -t 1 && read value && printf 'terminal:%s:%s\\n' \"$TERM\" \"$value\"")
+	if err != nil {
+		t.Fatalf("run command with pty: %v; output: %q", err, out)
+	}
+	if !strings.Contains(string(out), "terminal:xterm-256color:hello") {
+		t.Fatalf("command output = %q", out)
+	}
+
+	failing, err := client.NewSession()
+	if err != nil {
+		t.Fatalf("new failing session: %v", err)
+	}
+	defer failing.Close()
+	if err := failing.RequestPty("xterm", 24, 80, ssh.TerminalModes{}); err != nil {
+		t.Fatalf("request failing command pty: %v", err)
+	}
+	exitErr, ok := failing.Run("exit 7").(*ssh.ExitError)
+	if !ok || exitErr.ExitStatus() != 7 {
+		t.Fatalf("pty command exit status = %v, want 7", exitErr)
+	}
+}
+
 func TestExecSeparatesStdoutAndStderr(t *testing.T) {
 	t.Parallel()
 	client := startExecTestServer(t)
