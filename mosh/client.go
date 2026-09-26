@@ -24,6 +24,10 @@ type ClientConfig struct {
 	// literal argv to run in its terminal; an empty slice starts the remote shell.
 	Server  string
 	Command []string
+	// Prefix prepends a cleartext routing envelope to client-to-server UDP
+	// datagrams. Zero disables it. A compatible load balancer may route on and
+	// strip the envelope; sshd-lite servers also accept and discard it directly.
+	Prefix uint32
 	// Output receives ANSI screen updates from one goroutine. Nil discards output.
 	// Writes must return promptly; unblock a blocking writer before Close or Wait.
 	// The caller owns Output and must not access it concurrently without locking.
@@ -123,7 +127,11 @@ func Start(ctx context.Context, conn *ssh.Client, c ClientConfig) (*Session, err
 	session := &Session{ctx: runCtx, cancel: cancel, input: make(chan []byte, 16), sizes: make(chan protocol.Request, 1), done: make(chan struct{})}
 	session.sizes <- req
 	go func() {
-		session.code, session.err = protocol.RunClient(runCtx, udp, credentials.Key, req, session.input, session.sizes, output)
+		connection := net.Conn(udp)
+		if c.Prefix != 0 {
+			connection = &routingPrefixConn{Conn: udp, prefix: c.Prefix}
+		}
+		session.code, session.err = protocol.RunClient(runCtx, connection, credentials.Key, req, session.input, session.sizes, output)
 		// Cancellation wins over a racing remote shutdown acknowledgement.
 		if session.err == nil && runCtx.Err() != nil {
 			session.code, session.err = 0, runCtx.Err()
@@ -132,6 +140,22 @@ func Start(ctx context.Context, conn *ssh.Client, c ClientConfig) (*Session, err
 		close(session.done)
 	}()
 	return session, nil
+}
+
+type routingPrefixConn struct {
+	net.Conn
+	prefix uint32
+}
+
+func (c *routingPrefixConn) Write(datagram []byte) (int, error) {
+	prefixed := protocol.AddRoutingPrefix(c.prefix, datagram)
+	n, err := c.Conn.Write(prefixed)
+	if n >= protocol.RoutingPrefixHeaderSize {
+		n -= protocol.RoutingPrefixHeaderSize
+	} else if n > 0 {
+		n = 0
+	}
+	return min(n, len(datagram)), err
 }
 
 // Write copies and queues terminal input, applying bounded backpressure during

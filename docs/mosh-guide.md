@@ -97,6 +97,29 @@ session expires after five minutes and then requires a new SSH bootstrap.
 Replayed or invalid packets and server output alone do not extend the timeout.
 The server accepts at most 64 pending or active Mosh sessions.
 
+### Load-balancer routing prefix
+
+The sshd-lite client can prepend an optional cleartext routing envelope to every
+client-to-server UDP datagram:
+
+```sh
+sshd-lite client --mosh --mosh-prefix 16909060 user@host
+```
+
+Go clients set the same value with `mosh.ClientConfig.Prefix`.
+
+The eight-byte envelope is `80 4d 50 01` followed by the configured `uint32` in
+network byte order. A load balancer can route on the value and strip the eight
+bytes before forwarding the original, fully standard Mosh datagram. Server
+replies remain standard and carry no envelope. An sshd-lite Mosh server also
+recognizes and silently removes the envelope, which makes direct connections
+between sshd-lite peers work without a separate load balancer.
+
+The value is an unauthenticated routing hint, not a session credential; Mosh's
+encrypted packet authentication still decides whether the selected backend
+accepts it. Zero disables the extension. A standard Mosh server requires the
+load balancer to remove the envelope and otherwise rejects prefixed packets.
+
 ## Terminal behavior and limits
 
 - Exit the shell normally, or type **Ctrl-^** followed by **.** to disconnect.

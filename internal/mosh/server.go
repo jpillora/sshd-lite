@@ -104,19 +104,20 @@ func (s *Server) readLoop() {
 		if err != nil {
 			return
 		}
-		if n < 28 || buf[0]&0x80 != 0 {
+		datagram, _, _ := stripRoutingPrefix(buf[:n])
+		if len(datagram) < 28 || datagram[0]&0x80 != 0 {
 			continue
 		}
 		var nonce [12]byte
-		copy(nonce[4:], buf[:8])
+		copy(nonce[4:], datagram[:8])
 		s.mu.Lock()
 		for session := range s.sessions {
 			// Mosh has no session ID on the wire. Authenticate against the bounded
 			// key set before routing; never trust a source address (clients roam).
-			if session.ocb.Decrypt(nonce[:], buf[8:n]) == nil {
+			if session.ocb.Decrypt(nonce[:], datagram[8:]) == nil {
 				continue
 			}
-			p := packet{data: append([]byte(nil), buf[:n]...), addr: addr}
+			p := packet{data: append([]byte(nil), datagram...), addr: addr}
 			select {
 			case session.packets <- p:
 			default:

@@ -62,6 +62,7 @@ type clientCommand struct {
 	client.Config
 	Mosh       bool   `opts:"name=mosh,help=use SSH to obtain a key then run the terminal over UDP"`
 	MoshServer string `opts:"name=mosh-server,help=remote mosh-server executable (default mosh-server)"`
+	MoshPrefix uint32 `opts:"name=mosh-prefix,help=prepend a routable uint32 envelope to Mosh UDP packets"`
 }
 
 func newCLI() (opts.Opts, *serverCommand, *clientCommand) {
@@ -110,7 +111,7 @@ func runClient(ctx context.Context, c *clientCommand) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return mosh.Run(ctx, conn, os.Stdin, os.Stdout, mosh.ClientConfig{Server: c.MoshServer, Command: c.Command})
+	return mosh.Run(ctx, conn, os.Stdin, os.Stdout, mosh.ClientConfig{Server: c.MoshServer, Command: c.Command, Prefix: c.MoshPrefix})
 }
 
 func runServer(ctx context.Context, c *serverCommand) error {

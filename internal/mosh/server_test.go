@@ -306,6 +306,24 @@ func TestInvalidKeyCannotAssociateOrRenew(t *testing.T) {
 	}
 }
 
+func TestRoutingPrefixIsSilentlyRemoved(t *testing.T) {
+	s := testServer(t, 3*time.Second)
+	e := newEcho()
+	_, tr := issue(t, s, e)
+	c := udpClient(t, s)
+	tr.ForceNextSend()
+	datagram := tr.Tick()[0]
+	if _, err := c.Write(AddRoutingPrefix(0x01020304, datagram)); err != nil {
+		t.Fatal(err)
+	}
+	receive(t, c, tr)
+	select {
+	case <-e.done:
+		t.Fatal("prefixed datagram closed terminal")
+	default:
+	}
+}
+
 func TestSharedPortSessionsAndResize(t *testing.T) {
 	s := testServer(t, 3*time.Second)
 	a, b := newEcho(), newEcho()

@@ -116,7 +116,7 @@ func TestMoshPublicAPI(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			output := new(apiOutput)
-			cfg := mosh.ClientConfig{Columns: 93, Rows: 31, Output: output}
+			cfg := mosh.ClientConfig{Columns: 93, Rows: 31, Output: output, Prefix: 0x01020304}
 			var session *mosh.Session
 			var err error
 			if start == "dial" {

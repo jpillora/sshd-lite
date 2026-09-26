@@ -55,11 +55,11 @@ func TestMoshStartupLoggingAndQuiet(t *testing.T) {
 
 func TestCLIExposesAndParsesClientCommand(t *testing.T) {
 	cli, server, client := newCLI()
-	parsed, err := cli.ParseArgsError([]string{"sshd-lite", "client", "--accept", "--port", "2222", "user@example.com", "printf", "ok"})
+	parsed, err := cli.ParseArgsError([]string{"sshd-lite", "client", "--accept", "--port", "2222", "--mosh-prefix", "16909060", "user@example.com", "printf", "ok"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if server.Command != "client" || client.Destination != "user@example.com" || client.Port != "2222" || !client.Accept || !reflect.DeepEqual(client.Command, []string{"printf", "ok"}) {
+	if server.Command != "client" || client.Destination != "user@example.com" || client.Port != "2222" || !client.Accept || client.MoshPrefix != 0x01020304 || !reflect.DeepEqual(client.Command, []string{"printf", "ok"}) {
 		t.Fatalf("server=%#v client=%#v", server, client)
 	}
 	if !strings.Contains(parsed.Help(), "client") {
