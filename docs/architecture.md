@@ -31,6 +31,10 @@ without forcing duplicate implementations into a strict tree. In particular:
   the detached terminal adapter owns its independent terminal lifetime.
 - `internal/termio` owns local terminal modes and resize notifications.
 - `internal/sshconn` owns context-aware TCP dialing and SSH handshake deadlines.
+- `client.Dial` is the explicit-input connection boundary for library consumers;
+  it does not read the process environment. `client.Connect` captures the existing
+  CLI configuration and delegates connection establishment to that boundary.
+  Callers own the returned upstream `ssh.Client` and its session lifetime.
 - `github.com/jpillora/sftp` is the public, history-preserving SFTP fork used by
   both the server and test client. Its request server preserves open-handle
   FSTAT/FSETSTAT semantics after rename or unlink.

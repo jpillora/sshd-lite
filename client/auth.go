@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jpillora/sshd-lite/internal/sshconn"
 	"github.com/jpillora/sshd-lite/internal/termio"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -409,5 +408,9 @@ func (c Config) connect(ctx context.Context) (*ssh.Client, error) {
 		}
 		return promptPassword(username + "@" + address + " password: ")
 	}))
-	return sshconn.Dial(ctx, address, &ssh.ClientConfig{User: username, Auth: auth, HostKeyCallback: hostKey})
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	return Dial(ctx, DialOptions{Host: host, Port: port, User: username, Auth: auth, HostKeyCallback: hostKey})
 }
