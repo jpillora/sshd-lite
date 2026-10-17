@@ -111,3 +111,28 @@ lifecycle tests, SSH behavior tests, and public Mosh API tests passing. Protocol
 and PTY changes also require the Debian interoperability and actual tmux suite,
 including resize, application cursor keys, terminal restoration and cancellation.
 The CI interoperability job targets `./mosh ./internal/mosh/...`.
+
+# Shared SSH client configuration
+
+`client.Resolve` captures explicit config/environment authority and returns reusable
+options. It owns bounded Host/Include parsing, identity and trust-path selection,
+and language-only SendEnv selection. `client.Dial` resolves implicitly when needed;
+session owners resolve first to apply `SendEnvironment` using `Session.Setenv`.
+The authentication owner retains agent connections only through synchronous
+handshake signatures, with cancellation and finite response/identity limits.
+Encrypted keys with public headers are decrypted only when a signature is needed;
+a matching loaded agent avoids decryption. No library operation inherits HOME,
+SSH_AUTH_SOCK or config sources. Existing `Connect` remains the CLI-policy adapter.
+
+Relative Include paths follow the user's Home/.ssh root (system ssh_config uses
+/etc/ssh); only final-component wildcards are admitted. Match, proxy/jump, active
+forwarding and positive keepalive policies refuse. GSSAPIAuthentication is a
+boolean capability preference: this client offers public-key and explicit
+password methods only, as a client built without GSSAPI does. Language SendEnv
+requests are best-effort session requests, not authentication input.
+
+The config lexer/host matcher and identity-order policy reuse the preserved Tigo
+#59 source; other archived transport
+and cryptographic code remains parked. The concrete source ref is
+`refs/snapshots/tigo-serial-20261017/md59` at
+`12b863ea22c429b93c42fccf2fadbff4528c3323`.
