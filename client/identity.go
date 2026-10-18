@@ -124,7 +124,7 @@ func prepareAuthentication(ctx context.Context, o DialOptions) ([]ssh.AuthMethod
 					}
 				}
 				if pub == nil {
-					signer, err = ssh.ParsePrivateKeyWithPassphrase(data, o.Passphrase)
+					signer, err = decryptIdentity(ctx, o, name, data)
 					if err != nil {
 						return nil, err
 					}
@@ -136,8 +136,16 @@ func prepareAuthentication(ctx context.Context, o DialOptions) ([]ssh.AuthMethod
 			return orderedSigners(agentKeys, files, o.resolved.only), nil
 		}))
 	}
-	if o.Password != "" && o.resolved.password {
-		methods = append(methods, ssh.Password(o.Password))
+	if o.resolved.password {
+		if o.Password != "" {
+			methods = append(methods, ssh.Password(o.Password))
+		} else if o.passwordCallback != nil {
+			methods = append(methods, ssh.PasswordCallback(func() (string, error) {
+				var password string
+				err := o.interaction.run(ctx, func() error { var e error; password, e = o.passwordCallback(); return e })
+				return password, err
+			}))
+		}
 	}
 	return methods, owner.close
 }
@@ -198,7 +206,7 @@ func (s *fileSigner) SignWithAlgorithm(random io.Reader, data []byte, algorithm 
 			return nil, errors.New("ssh client: selected public identity is not available in agent")
 		}
 		var err error
-		s.signer, err = ssh.ParsePrivateKeyWithPassphrase(s.data, s.options.Passphrase)
+		s.signer, err = decryptIdentity(s.ctx, s.options, s.path, s.data)
 		if err != nil {
 			return nil, fmt.Errorf("ssh client: encrypted identity requires a passphrase: %w", err)
 		}

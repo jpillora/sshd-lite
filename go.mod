@@ -13,7 +13,7 @@ require (
 	github.com/jpillora/sftp v1.13.15
 	github.com/muesli/cancelreader v0.2.2
 	github.com/unixshells/mosh-go v0.5.2
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 	mvdan.cc/sh/v3 v3.12.0

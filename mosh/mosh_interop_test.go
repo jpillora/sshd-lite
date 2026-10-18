@@ -148,7 +148,15 @@ func TestLiteClientAgainstReferenceMoshServer(t *testing.T) {
 	// handler or native key request participates in this pairing.
 	config := startOpenSSH(t)
 	code, out, _, err := runInput(t, config, "printf 'REFERENCE_%s\\n' SERVER\nexit 7\n")
-	if err != nil || code != 0 || !strings.Contains(out, "REFERENCE_SERVER") {
+	// Mosh repaints cells with cursor movements; a visible word need not be
+	// contiguous in the raw ANSI stream, especially after a login banner.
+	screen := vt.NewEmulator(80, 24)
+	screen.InputPipe().(io.Closer).Close()
+	defer screen.Close()
+	if _, renderErr := screen.Write([]byte(out)); renderErr != nil {
+		t.Fatal(renderErr)
+	}
+	if err != nil || code != 0 || !strings.Contains(screen.String(), "REFERENCE_SERVER") {
 		t.Fatalf("code=%d err=%v output=%q", code, err, out)
 	}
 }

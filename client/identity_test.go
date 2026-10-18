@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -175,5 +176,41 @@ func TestDialConfiguredAliasAndKey(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("server not closed")
+	}
+}
+
+func TestEncryptedIdentityInteraction(t *testing.T) {
+	key, signer := keyForTest(t)
+	block, e := ssh.MarshalPrivateKeyWithPassphrase(key, "test", []byte("correct"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	o, e := Resolve(context.Background(), DialOptions{Host: "example", User: "git"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	attempts := 0
+	var returned []byte
+	o.Interaction.Passphrase = func(ctx context.Context, path string) ([]byte, error) {
+		attempts++
+		if attempts == 1 {
+			return []byte("wrong"), nil
+		}
+		returned = []byte("correct")
+		return returned, nil
+	}
+	s := &fileSigner{ctx: context.Background(), path: "key", options: o, public: signer.PublicKey(), data: pem.EncodeToMemory(block)}
+	if _, e := s.Sign(rand.Reader, []byte("challenge")); e != nil {
+		t.Fatal(e)
+	}
+	if attempts != 2 {
+		t.Fatal("wrong attempt count")
+	}
+	if !bytes.Equal(returned, make([]byte, len(returned))) {
+		t.Fatal("passphrase bytes not cleared")
+	}
+	o.resolved.batch = true
+	if _, e := decryptIdentity(context.Background(), o, "key", pem.EncodeToMemory(block)); !errors.Is(e, ErrInteractionRequired) {
+		t.Fatal(e)
 	}
 }

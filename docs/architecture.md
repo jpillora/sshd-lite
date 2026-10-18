@@ -136,3 +136,29 @@ The config lexer/host matcher and identity-order policy reuse the preserved Tigo
 and cryptographic code remains parked. The concrete source ref is
 `refs/snapshots/tigo-serial-20261017/md59` at
 `12b863ea22c429b93c42fccf2fadbff4528c3323`.
+
+# Interaction and trust publication
+
+`client.Interaction` supplies synchronous context-aware confirmation/passphrase
+callbacks. Nil callbacks and BatchMode do not prompt. `TerminalInteraction` owns
+the controlling terminal, raw-mode restoration, polling/cancellation and hidden
+secret input on Unix; other systems return interaction-required until qualified.
+No background terminal reader consumes caller input. The dial owner suspends
+its network deadline during callbacks; caller context still closes the connection.
+
+The default Dial trust policy asks only for unknown ordinary host keys, and
+refuses changed/revoked keys and unknown certificate authorities. Trust is parsed
+from bounded regular-file snapshots using upstream key/certificate primitives.
+Accepted keys go to the selected user file under an exclusive .lock, with fresh
+trust checks, byte/identity guards, permission preservation and atomic rename.
+New files use 0600, directories 0700; symlinked write destinations refuse. Locks
+coordinate cooperating writers; guards do not promise atomic exclusion of
+arbitrary writers. `TrustWriteError.Published` reports late durability errors.
+Trust persists independently of subsequent authentication/repository effects.
+Legacy Connect keeps its prior private trust and replacement choices; its key,
+agent, dialing and Unix terminal implementation now shares these client owners.
+Legacy Connect retains its previous blocking terminal adapter on non-Unix systems;
+that adapter is not exposed as the cancellable Dial interaction API.
+
+The bounded snapshot matcher is adapted from the same archived #59 trust source,
+without copied cryptographic internals. This does not qualify the whole #59 task.

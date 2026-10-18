@@ -14,13 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/jpillora/sshd-lite/internal/termio"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
-	"golang.org/x/term"
 )
 
 func expandHome(path string) string {
@@ -53,23 +49,16 @@ func (c Config) knownHostsPath() (string, error) {
 }
 
 func promptPassword(prompt string) (string, error) {
-	tty, err := termio.OpenTTY()
-	if err != nil {
-		return "", fmt.Errorf("%s: no terminal; use --password or --identity", prompt)
-	}
-	defer tty.Close()
-	out, err := termio.OpenTTYOutput()
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-	fmt.Fprint(out, prompt)
-	b, err := term.ReadPassword(int(tty.Fd()))
-	fmt.Fprintln(out)
-	return string(b), err
+	b, e := legacyTerminalRead(context.Background(), prompt, true)
+	defer clear(b)
+	return string(b), e
 }
 
 func knownHostsCallback(filename string, accept, strict bool) (ssh.HostKeyCallback, error) {
+	return knownHostsCallbackContext(context.Background(), filename, accept, strict)
+}
+
+func knownHostsCallbackContext(ctx context.Context, filename string, accept, strict bool) (ssh.HostKeyCallback, error) {
 	filename = expandHome(filename)
 	check, err := knownhosts.New(filename)
 	if err != nil {
@@ -130,7 +119,7 @@ func knownHostsCallback(filename string, accept, strict bool) (ssh.HostKeyCallba
 		// caller explicitly supplied --accept. --strict-hosts restores the
 		// confirmation step for a previously unknown host.
 		if !accept && (mismatch || strict) {
-			confirmed, promptErr := confirmHostKey(hostname, key, mismatch)
+			confirmed, promptErr := confirmHostKeyContext(ctx, hostname, key, mismatch)
 			if promptErr != nil {
 				return fmt.Errorf("verify host key: %w: %v", err, promptErr)
 			}
@@ -169,21 +158,17 @@ func certificateRevoked(filename string, cert *ssh.Certificate) (bool, error) {
 }
 
 func confirmHostKey(hostname string, key ssh.PublicKey, mismatch bool) (bool, error) {
-	tty, err := termio.OpenTTY()
-	if err != nil {
-		return false, errors.New("no terminal available; use --accept to confirm non-interactively")
+	return confirmHostKeyContext(context.Background(), hostname, key, mismatch)
+}
+func confirmHostKeyContext(ctx context.Context, hostname string, key ssh.PublicKey, mismatch bool) (bool, error) {
+	var prompt bytes.Buffer
+	writeHostKeyPrompt(&prompt, hostname, key, mismatch)
+	b, e := legacyTerminalRead(ctx, prompt.String(), false)
+	if e != nil {
+		return false, e
 	}
-	defer tty.Close()
-	out, err := termio.OpenTTYOutput()
-	if err != nil {
-		return false, err
-	}
-	defer out.Close()
-	if !term.IsTerminal(int(tty.Fd())) {
-		return false, errors.New("host-key confirmation requires a terminal; use --accept")
-	}
-	writeHostKeyPrompt(out, hostname, key, mismatch)
-	return readConfirmation(tty)
+	defer clear(b)
+	return readConfirmation(bytes.NewReader(b))
 }
 
 func writeHostKeyPrompt(w io.Writer, hostname string, key ssh.PublicKey, mismatch bool) {
@@ -346,71 +331,34 @@ func (c Config) connect(ctx context.Context) (*ssh.Client, error) {
 		if pathErr != nil {
 			return nil, pathErr
 		}
-		hostKey, err = knownHostsCallback(path, c.Accept, c.StrictHosts)
+		hostKey, err = knownHostsCallbackContext(ctx, path, c.Accept, c.StrictHosts)
 		if err != nil {
 			return nil, fmt.Errorf("load known hosts (use --known-hosts or explicitly --insecure): %w", err)
 		}
 	}
-	var auth []ssh.AuthMethod
-	var signers []ssh.Signer
-	var agentSigners func() ([]ssh.Signer, error)
-	if socket := os.Getenv("SSH_AUTH_SOCK"); socket != "" {
-		agentConn, err := net.DialTimeout("unix", socket, 3*time.Second)
-		if err == nil {
-			defer agentConn.Close()
-			agentSigners = agent.NewClient(agentConn).Signers
-		}
+
+	home, _ := os.UserHomeDir()
+	directory, err := os.Getwd()
+	if err != nil {
+		return nil, err
 	}
-	paths := []string{c.Identity}
-	if c.Identity == "" {
-		paths = []string{"~/.ssh/id_ed25519", "~/.ssh/id_rsa"}
+	sources := Sources{Home: home, Directory: directory, AgentSocket: os.Getenv("SSH_AUTH_SOCK")}
+	var identities []string
+	if c.Identity != "" {
+		p := expandHome(c.Identity)
+		if _, e := os.Stat(p); e != nil {
+			return nil, e
+		}
+		identities = []string{p}
 	}
-	for _, path := range paths {
-		b, err := os.ReadFile(expandHome(path))
-		if err != nil {
-			if c.Identity != "" {
-				return nil, err
-			}
-			continue
-		}
-		signer, err := ssh.ParsePrivateKey(b)
-		var missing *ssh.PassphraseMissingError
-		if errors.As(err, &missing) && c.Identity != "" {
-			pass, promptErr := promptPassword("Private key passphrase: ")
-			if promptErr != nil {
-				return nil, promptErr
-			}
-			signer, err = ssh.ParsePrivateKeyWithPassphrase(b, []byte(pass))
-		}
-		if err != nil {
-			if c.Identity != "" {
-				return nil, err
-			}
-			continue
-		}
-		signers = append(signers, signer)
-	}
-	// Go SSH tries each authentication method once. Combine explicit keys and
-	// agent keys so a loaded agent cannot hide the requested identity.
-	auth = append(auth, ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
-		keys := append([]ssh.Signer(nil), signers...)
-		if agentSigners != nil {
-			more, err := agentSigners()
-			if err == nil {
-				keys = append(keys, more...)
-			}
-		}
-		return keys, nil
-	}))
-	auth = append(auth, ssh.PasswordCallback(func() (string, error) {
-		if c.Password != "" {
-			return c.Password, nil
-		}
-		return promptPassword(username + "@" + address + " password: ")
-	}))
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
 	}
-	return Dial(ctx, DialOptions{Host: host, Port: port, User: username, Auth: auth, HostKeyCallback: hostKey})
+	return Dial(ctx, DialOptions{Host: host, Port: port, User: username, Sources: sources, IdentityFiles: identities, Password: c.Password,
+		HostKeyCallback: hostKey, Interaction: legacyInteraction(), passwordCallback: func() (string, error) {
+			b, e := legacyTerminalRead(ctx, username+"@"+address+" password: ", true)
+			defer clear(b)
+			return string(b), e
+		}})
 }

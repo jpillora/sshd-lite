@@ -303,6 +303,13 @@ func readSource(ctx context.Context, name string, limit int64) ([]byte, error) {
 	if int64(len(b)) > limit {
 		return nil, errors.New("ssh client: source byte limit")
 	}
+	after, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) || int64(len(b)) != info.Size() {
+		return nil, errors.New("ssh client: source changed while reading")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -16,6 +16,9 @@ import (
 // Dial never reads the process environment. The caller must not mutate options
 // or authentication backing data during Dial. The returned client is caller-owned.
 type DialOptions struct {
+	passwordCallback func() (string, error)
+	Interaction      Interaction
+	interaction      *interactionOwner
 	Host, User, Port string
 	Sources          Sources
 	IdentityFiles    []string
@@ -58,16 +61,23 @@ func Dial(ctx context.Context, options DialOptions) (*ssh.Client, error) {
 	if options.Timeout < 0 {
 		return nil, errors.New("ssh client: negative connection timeout")
 	}
+	options.interaction = &interactionOwner{}
 	if options.HostKeyCallback == nil {
-		options.HostKeyCallback, err = prepareTrust(options)
+		options.HostKeyCallback, err = prepareTrust(ctx, options)
 		if err != nil {
 			return nil, err
 		}
 	}
+	if options.HostKeyCallback != nil {
+		callback := options.HostKeyCallback
+		options.HostKeyCallback = func(host string, remote net.Addr, key ssh.PublicKey) error {
+			return options.interaction.run(ctx, func() error { return callback(host, remote, key) })
+		}
+	}
 	auth, closeAuth := prepareAuthentication(ctx, options)
 	defer closeAuth()
-	return sshconn.Dial(ctx, net.JoinHostPort(options.Host, port), &ssh.ClientConfig{
+	return sshconn.DialWithSetup(ctx, net.JoinHostPort(options.Host, port), &ssh.ClientConfig{
 		User: options.User, Auth: auth,
 		HostKeyCallback: options.HostKeyCallback, Timeout: options.Timeout,
-	})
+	}, func(c net.Conn) { options.interaction.conn = c })
 }
