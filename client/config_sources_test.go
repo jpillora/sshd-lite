@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -16,7 +18,7 @@ func TestResolveConfigNative(t *testing.T) {
 	os.Mkdir(filepath.Join(d, "conf.d"), 0700)
 	p := filepath.Join(d, "config")
 	text := "Host work !other\n HostName example.test\n User from-config\n Port 2222\n IdentityFile ~/.ssh/work\n Include conf.d/*.conf\nHost *\n User fallback\n Port 22\n HashKnownHosts yes\n SendEnv LANG LC_*\n"
-	text = strings.Replace(text, "Include conf.d/*.conf", "Include "+filepath.Join(d, "conf.d", "*.conf"), 1)
+	text = strings.Replace(text, "Include conf.d/*.conf", "Include "+strconv.Quote(filepath.ToSlash(filepath.Join(d, "conf.d", "*.conf"))), 1)
 	os.WriteFile(p, []byte(text), 0600)
 	os.WriteFile(filepath.Join(d, "conf.d", "a.conf"), []byte("IdentitiesOnly yes\nIdentityAgent none\n"), 0600)
 	o := DialOptions{Host: "work", Sources: Sources{Home: d, Directory: d, LocalUser: "local", ConfigFiles: []string{p}, Environment: map[string]string{"LANG": "C", "LC_TIME": "C", "SECRET": "hidden"}}}
@@ -65,7 +67,7 @@ func TestResolveConfigRefusals(t *testing.T) {
 	}
 	d := t.TempDir()
 	p := filepath.Join(d, "config")
-	os.WriteFile(p, []byte("Include "+p+"\n"), 0600)
+	os.WriteFile(p, []byte("Include "+strconv.Quote(filepath.ToSlash(p))+"\n"), 0600)
 	if _, err := Resolve(context.Background(), DialOptions{Host: "example", User: "git", Sources: Sources{Directory: d, ConfigFiles: []string{p}}}); err == nil {
 		t.Fatal("include cycle accepted")
 	}
@@ -79,5 +81,8 @@ func TestResolveDoesNotInheritProcess(t *testing.T) {
 	}
 	if got.Sources.AgentSocket != "" || len(got.IdentityFiles) != 0 || got.Sources.Home != "" {
 		t.Fatal("inherited process authority")
+	}
+	if runtime.GOOS == "windows" && len(got.resolved.known) != 0 {
+		t.Fatal("inherited Unix system trust path on Windows")
 	}
 }

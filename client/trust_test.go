@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -131,7 +132,7 @@ func TestTrustRefusalAndConcurrentEntries(t *testing.T) {
 		t.Fatal("lost concurrent other-host entry")
 	}
 	info, _ := os.Stat(p)
-	if info.Mode().Perm() != 0640 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0640 {
 		t.Fatal("permissions changed")
 	}
 }

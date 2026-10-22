@@ -29,7 +29,14 @@ func TestDialCancellationDuringHandshake(t *testing.T) {
 		}
 		done <- err
 	}()
-	c := <-accepted
+	var c net.Conn
+	select {
+	case c = <-accepted:
+	case err := <-done:
+		t.Fatalf("dial failed before TCP connection: %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("dial did not establish TCP connection")
+	}
 	if c == nil {
 		t.Fatal("accept failed")
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -163,7 +164,9 @@ func Resolve(ctx context.Context, o DialOptions) (DialOptions, error) {
 		}
 		known = append(known, user...)
 		global := r.scalars["globalknownhostsfile"]
-		if global == nil {
+		// Windows has no implicit Unix system trust path. A rooted path such
+		// as /etc/ssh/ssh_known_hosts is drive-relative there, not absolute.
+		if global == nil && runtime.GOOS != "windows" {
 			global = []string{"/etc/ssh/ssh_known_hosts"}
 		}
 		known = append(known, global...)

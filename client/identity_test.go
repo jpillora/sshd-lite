@@ -32,6 +32,18 @@ func keyForTest(t *testing.T) (ed25519.PrivateKey, ssh.Signer) {
 	}
 	return key, s
 }
+
+func agentSocketForTest(t *testing.T) string {
+	t.Helper()
+	// macOS TempDir paths can exceed the Unix socket address limit.
+	d, err := os.MkdirTemp("/tmp", "sshd-agent-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(d) })
+	return filepath.Join(d, "agent")
+}
+
 func TestIdentityAgentSelectionAndEncryptedKey(t *testing.T) {
 	d := t.TempDir()
 	key, signer := keyForTest(t)
@@ -42,7 +54,7 @@ func TestIdentityAgentSelectionAndEncryptedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.WriteFile(path, pem.EncodeToMemory(block), 0600)
-	socket := filepath.Join(d, "agent.sock")
+	socket := agentSocketForTest(t)
 	l, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +105,7 @@ func TestIdentityAgentSelectionAndEncryptedKey(t *testing.T) {
 	}
 }
 func TestAgentCancellation(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "agent")
+	socket := agentSocketForTest(t)
 	l, e := net.Listen("unix", socket)
 	if e != nil {
 		t.Fatal(e)

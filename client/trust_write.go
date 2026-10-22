@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // TrustWriteError reports whether the accepted key was published before a late
@@ -146,6 +147,11 @@ func saveHostKey(ctx context.Context, o DialOptions, address string, remote net.
 		return err
 	}
 	published = true
+	// Go's Windows directory handles do not support Sync. The file itself
+	// was synced above; parent-directory durability is only available on Unix.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	directory, err := os.Open(dir)
 	if err != nil {
 		return err

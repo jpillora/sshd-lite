@@ -160,5 +160,9 @@ agent, dialing and Unix terminal implementation now shares these client owners.
 Legacy Connect retains its previous blocking terminal adapter on non-Unix systems;
 that adapter is not exposed as the cancellable Dial interaction API.
 
+Windows has no implicit `/etc/ssh/ssh_known_hosts` source; callers can supply
+system trust paths explicitly. Trust publication syncs the file on every platform
+and the parent directory on Unix; Unix permission modes do not configure Windows ACLs.
+
 The bounded snapshot matcher is adapted from the same archived #59 trust source,
 without copied cryptographic internals. This does not qualify the whole #59 task.
