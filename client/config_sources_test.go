@@ -40,8 +40,9 @@ func TestResolveConfigNative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nativeOutput := strings.ReplaceAll(string(out), "\r\n", "\n")
 	for _, line := range []string{"hostname " + got.Host, "user " + got.User, "port " + got.Port, "identitiesonly yes"} {
-		if !strings.Contains(string(out), line+"\n") {
+		if !strings.Contains(nativeOutput, line+"\n") {
 			t.Fatalf("native lacks %q", line)
 		}
 	}
