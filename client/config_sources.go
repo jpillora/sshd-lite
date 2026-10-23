@@ -35,6 +35,7 @@ func (e *UnsupportedError) Error() string {
 }
 
 type resolvedConfig struct {
+	inputs                    resolvedInputs
 	only, batch, hash         bool
 	strict, alias, writeTrust string
 	known                     []string
@@ -54,12 +55,20 @@ type configReader struct {
 // Resolve captures configuration for a connection. Dial also calls Resolve.
 // Callers that use SendEnv should resolve once, then pass the returned options
 // to Dial and apply SendEnvironment to their session (server rejection is normal).
-// Returned options may be reused, but must not be mutated during use.
+// Returned configuration (Host, User, Port, Sources, IdentityFiles, Timeout and
+// SendEnvironment) is frozen: edits cause ErrResolvedOptionsChanged. Keep the
+// original input to resolve a different target or policy. Credentials, Auth,
+// HostKeyCallback and Interaction may be supplied per attempt. Nothing may be
+// mutated during Resolve or Dial. Sources are copied and configuration is parsed
+// once; identity and trust file contents are re-read for each Dial.
 func Resolve(ctx context.Context, o DialOptions) (DialOptions, error) {
 	if err := ctx.Err(); err != nil {
 		return o, err
 	}
 	if o.resolved != nil {
+		if !o.resolved.matches(o) {
+			return o, ErrResolvedOptionsChanged
+		}
 		return o, nil
 	}
 	if o.Host == "" || len(o.Host) > 4096 || len(o.User) > 4096 || strings.ContainsAny(o.Host+o.User, "\x00\r\n") {
@@ -222,6 +231,7 @@ func Resolve(ctx context.Context, o DialOptions) (DialOptions, error) {
 		}
 	}
 	o.resolved = state
+	sealConfiguration(&o)
 	return o, nil
 }
 

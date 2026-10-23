@@ -15,6 +15,7 @@ import (
 // DialOptions supplies a connection's authority and authentication explicitly.
 // Dial never reads the process environment. The caller must not mutate options
 // or authentication backing data during Dial. The returned client is caller-owned.
+// Configuration returned by Resolve is frozen; see Resolve for reuse rules.
 type DialOptions struct {
 	passwordCallback func() (string, error)
 	Interaction      Interaction

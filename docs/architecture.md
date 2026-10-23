@@ -115,7 +115,13 @@ The CI interoperability job targets `./mosh ./internal/mosh/...`.
 # Shared SSH client configuration
 
 `client.Resolve` captures explicit config/environment authority and returns reusable
-options. It owns bounded Host/Include parsing, identity and trust-path selection,
+options. Resolved configuration is sealed against a private copied snapshot;
+editing its endpoint, sources, identities, timeout or selected environment returns
+`client.ErrResolvedOptionsChanged` before any I/O. Start from fresh input options
+to choose a different target/policy. Credentials and callbacks remain per-attempt
+inputs, and each Dial owns its authentication and interaction state. Sources are
+copied and configuration is parsed once; identity and trust contents are re-read
+for each Dial. Resolution owns bounded Host/Include parsing, identity and trust-path selection,
 and language-only SendEnv selection. `client.Dial` resolves implicitly when needed;
 session owners resolve first to apply `SendEnvironment` using `Session.Setenv`.
 The authentication owner retains agent connections only through synchronous
