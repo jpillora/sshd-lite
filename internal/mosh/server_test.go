@@ -472,3 +472,25 @@ func TestClientRetransmitsWithoutDuplicatingInput(t *testing.T) {
 		t.Fatalf("duplicated or missing input: %q", terminal.text())
 	}
 }
+
+func TestTerminalStartupFailureReportsExitAndReleasesSession(t *testing.T) {
+	s := testServer(t, 5*time.Second)
+	var starts atomic.Int32
+	credentials, _, err := s.Issue(Request{Cols: 80, Rows: 24}, func() (Terminal, error) {
+		starts.Add(1)
+		return nil, fmt.Errorf("PTY allocation failed")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	code, err := RunClient(ctx, udpClient(t, s), credentials.Key, Request{Cols: 80, Rows: 24}, nil, nil, io.Discard)
+	if err != nil || code != 1 {
+		t.Fatalf("startup result: code=%d err=%v", code, err)
+	}
+	waitFor(t, func() bool { return sessionCount(s) == 0 })
+	if starts.Load() != 1 {
+		t.Fatalf("startup retried %d times", starts.Load())
+	}
+}

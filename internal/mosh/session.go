@@ -11,6 +11,17 @@ import (
 	wire "github.com/unixshells/mosh-go"
 )
 
+type terminalPhase uint8
+
+const (
+	terminalPending terminalPhase = iota
+	terminalRunning
+	terminalFailed
+	terminalFinished
+)
+
+func (p terminalPhase) ended() bool { return p == terminalFailed || p == terminalFinished }
+
 func (session *serverSession) run(ctx context.Context, s *Server, req Request, start StartTerminal) {
 	tr := session.transport
 	tr.SetCaps([]byte{0x80})
@@ -39,7 +50,8 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 		}
 	}()
 	var base, sent *display.State
-	dirty, ended, exitSent := false, false, false
+	dirty, exitSent := false, false
+	phase := terminalPending
 	exitCode := 0
 	var exitAt time.Time
 	// LastRecv starts at issue time and only advances for a fresh authenticated
@@ -76,20 +88,21 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 				}
 				continue
 			}
-			if terminal == nil && !ended {
+			if phase == terminalPending {
 				var err error
 				terminal, err = startTerminalIO(ctx, req, start, session.cancel)
 				if err != nil {
-					ended = true
+					phase = terminalFailed
 					exitCode = 1
 					exitAt = time.Now()
 				} else {
+					phase = terminalRunning
 					emu = terminal.screen
 					base = display.Blank(int(req.Cols), int(req.Rows))
 					output, exited = terminal.output, terminal.exited
 				}
 			}
-			if update == nil || ended {
+			if update == nil || phase != terminalRunning {
 				continue
 			}
 			instructions, err := inputs.apply(update)
@@ -136,7 +149,7 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 			}
 		case exitCode = <-exited:
 			exited = nil
-			ended = true
+			phase = terminalFinished
 			exitAt = time.Now()
 		case <-ticker.C:
 			if time.Since(tr.LastRecv()) >= s.idle {
@@ -168,14 +181,17 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 				echoes = echoes[1:]
 			}
 			// Allow the PTY reader to drain before sending the final screen and exit.
-			if !exitSent && (dirty || echoNum > sentEchoNum || (ended && output == nil)) {
+			if !exitSent && (dirty || echoNum > sentEchoNum || (phase.ended() && output == nil)) {
 				var instructions []wire.HostInstruction
-				sent = emu.Snapshot()
-				hoststring := sent.Diff(base)
-				if len(hoststring) > 0 {
-					instructions = append(instructions, wire.HostInstruction{Hoststring: hoststring, EchoAckNum: -1})
-					if sent.Columns() != base.Columns() || sent.Rows() != base.Rows() {
-						instructions = append([]wire.HostInstruction{{Width: int32(sent.Columns()), Height: int32(sent.Rows()), EchoAckNum: -1}}, instructions...)
+				// Startup failure has no screen, but must still send exit/shutdown.
+				if emu != nil {
+					sent = emu.Snapshot()
+					hoststring := sent.Diff(base)
+					if len(hoststring) > 0 {
+						instructions = append(instructions, wire.HostInstruction{Hoststring: hoststring, EchoAckNum: -1})
+						if sent.Columns() != base.Columns() || sent.Rows() != base.Rows() {
+							instructions = append([]wire.HostInstruction{{Width: int32(sent.Columns()), Height: int32(sent.Rows()), EchoAckNum: -1}}, instructions...)
+						}
 					}
 				}
 				if echoNum > baseEchoNum {
@@ -183,7 +199,7 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 				}
 				sentEchoNum = echoNum
 				dirty = false
-				if ended && output == nil {
+				if phase.ended() && output == nil {
 					b := make([]byte, 4)
 					binary.BigEndian.PutUint32(b, uint32(exitCode))
 					if tr.HasCap(0x80) {
@@ -200,7 +216,7 @@ func (session *serverSession) run(ctx context.Context, s *Server, req Request, s
 			for _, dg := range tr.Tick() {
 				s.conn.WriteToUDP(dg, remote)
 			}
-			if ended && time.Since(exitAt) > 5*time.Second {
+			if phase.ended() && time.Since(exitAt) > 5*time.Second {
 				return
 			}
 		}

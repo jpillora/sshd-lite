@@ -436,3 +436,39 @@ func TestMoshPublicAPIShortOutput(t *testing.T) {
 		t.Fatalf("short output silently dropped: %v", err)
 	}
 }
+
+// A failed startup must report failure without bringing down other sessions.
+func TestMoshPublicAPIStartupFailure(t *testing.T) {
+	address, auth, dir := apiServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	healthyOutput := new(apiOutput)
+	healthy, err := mosh.Dial(ctx, address, auth, mosh.ClientConfig{
+		Command: []string{"/bin/sh", "-c", "printf ALIVE; exec cat"}, Output: healthyOutput,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer healthy.Close()
+	awaitAPI(t, func() bool { return strings.Contains(healthyOutput.text(), "ALIVE") }, healthyOutput.text)
+	failed, err := mosh.Dial(ctx, address, auth, mosh.ClientConfig{Command: []string{filepath.Join(dir, "missing-executable")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer failed.Close()
+	if code, err := finishAPI(t, failed); err != nil || code != 1 {
+		t.Fatalf("startup failure: code=%d err=%v", code, err)
+	}
+	if _, err := io.WriteString(healthy, "STILL_ALIVE\n"); err != nil {
+		t.Fatal(err)
+	}
+	awaitAPI(t, func() bool { return strings.Contains(healthyOutput.text(), "STILL_ALIVE") }, healthyOutput.text)
+	after, err := mosh.Dial(ctx, address, auth, mosh.ClientConfig{Command: []string{"/bin/sh", "-c", "exit 7"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer after.Close()
+	if code, err := finishAPI(t, after); err != nil || code != 7 {
+		t.Fatalf("subsequent session: code=%d err=%v", code, err)
+	}
+}
