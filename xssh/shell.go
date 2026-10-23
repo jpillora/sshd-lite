@@ -14,11 +14,7 @@ import (
 
 // attachShell attaches a shell to the session
 func attachShell(sess *Session) error {
-	if err := attachPTYCommand(sess, nil); err != nil {
-		_ = sess.Channel.Close()
-		return err
-	}
-	return nil
+	return attachPTYCommand(sess, nil)
 }
 
 // attachPTYCommand runs a shell or command through the session's PTY.
@@ -32,11 +28,12 @@ func attachPTYCommand(sess *Session, command *string) error {
 	if cfg.WorkingDirectory != "" {
 		shell.Dir = cfg.WorkingDirectory
 	}
-	if !hasEnv(sess.Env, "TERM") {
-		sess.Env = append(sess.Env, "TERM=xterm-256color")
+	env := append([]string(nil), sess.Env...)
+	if !hasEnv(env, "TERM") {
+		env = append(env, "TERM=xterm-256color")
 	}
-	shell.Env = sess.Env
-	debugf(sess, "Session env: %v", sess.Env)
+	shell.Env = env
+	debugf(sess, "Session env: %v", env)
 
 	// This adapter owns SSH channel closure and graceful interruption; the
 	// internal terminal owner alone reaps the process and serializes PTY release.

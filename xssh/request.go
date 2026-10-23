@@ -9,7 +9,8 @@ import (
 // Request wraps ssh.Request to track whether Reply was called.
 type Request struct {
 	*ssh.Request
-	replied bool
+	replied  bool
+	accepted bool
 }
 
 // WrapRequest creates a wrapped request that tracks whether Reply was called.
@@ -23,6 +24,7 @@ func (r *Request) Reply(ok bool, payload []byte) error {
 		return errors.New("request already replied to")
 	}
 	r.replied = true
+	r.accepted = ok
 	return r.Request.Reply(ok, payload)
 }
 

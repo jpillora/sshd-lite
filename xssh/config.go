@@ -103,6 +103,10 @@ type ChannelHandler func(conn Conn, ch ssh.NewChannel) error
 // Call req.Reply() to send a custom reply; otherwise auto-reply is sent.
 // The handler runs synchronously in session-owned work and must return promptly
 // when the Session closes; Conn.Serve waits for it during shutdown.
+// Shell, exec and subsystem admission is enforced by the session dispatcher,
+// including custom handlers. Env and PTY setup must precede program admission;
+// window-change remains available afterward. A handler that rejects a program
+// without reporting success leaves the session available for another request.
 type SessionRequestHandler func(sess *Session, req *Request) error
 
 // SubsystemHandler handles subsystem requests (e.g., sftp).

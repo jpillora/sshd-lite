@@ -30,6 +30,13 @@ without forcing duplicate implementations into a strict tree. In particular:
   screen. SSH owns channel closure, output draining and bounded shutdown;
   the detached terminal adapter owns its independent terminal lifetime.
 - `internal/termio` owns local terminal modes and resize notifications.
+- `xssh.Session` owns serial request admission: configuration precedes one
+  successful shell, exec or subsystem request (including custom handlers).
+  Failed requests that never report success leave admission open; accepted exec
+  startup failures still consume the slot and report exit failure. Late env/PTY
+  setup is rejected, while window-change remains available. Request routing and
+  replies live in `xssh/session_dispatch.go`; connection/channel routing remains
+  in `xssh/conn.go`. Rejected subsystem requests no longer close a usable channel.
 - `internal/sshconn` owns context-aware TCP dialing and SSH handshake deadlines.
 - `client.Dial` is the explicit-input connection boundary for library consumers;
   it does not read the process environment. `client.Connect` captures the existing

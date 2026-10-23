@@ -137,13 +137,15 @@ func TestResolvedConfigurationConcurrentReuseWithHostKeyAlias(t *testing.T) {
 				serverDone <- err
 				return
 			}
-			// Both clients finish immediately after authentication.
+			// Let the client finish setup before it closes. Closing here as soon
+			// as server authentication finishes races its deadline reset.
 			sc, _, _, err := ssh.NewServerConn(c, server)
 			if err != nil {
 				c.Close()
 				serverDone <- err
 				return
 			}
+			_ = sc.Wait()
 			sc.Close()
 		}
 		serverDone <- nil

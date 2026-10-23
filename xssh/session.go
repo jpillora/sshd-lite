@@ -1,6 +1,7 @@
 package xssh
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -15,9 +16,13 @@ type Session struct {
 	stop  sync.Once
 	tasks sync.WaitGroup
 	pty   bool
+	// phase is owned by the serial session request dispatcher, never workers.
+	phase sessionPhase
 	// Channel is the underlying SSH "session" channel.
 	Channel ssh.Channel
-	// Env contains environment variables for this session.
+	// Env contains environment variables for this session. Built-in env/PTY
+	// setup is accepted only before program admission. Custom handlers must
+	// not mutate launch settings after starting work that reads them.
 	Env []string
 	// Resizes receives terminal resize events (window-change requests).
 	// Each payload contains exactly width and height as uint32 big-endian
@@ -43,9 +48,49 @@ func (s *Session) Done() <-chan struct{} {
 }
 
 func (s *Session) closeDone() {
+	s.phase = sessionClosing
 	if s.done != nil {
 		s.stop.Do(func() { close(s.done) })
 	}
+}
+
+type sessionPhase uint8
+
+const (
+	sessionConfiguring sessionPhase = iota
+	sessionStarting
+	sessionRunning
+	sessionClosing
+)
+
+// dispatchRequest reserves program ownership before invoking a handler, including
+// custom shell/exec/subsystem handlers. A rejection leaves configuration open;
+// once success is reported, even a later process-start error consumes the slot.
+func (s *Session) dispatchRequest(req *Request, handler func() error) error {
+	if s.phase == sessionClosing {
+		return fmt.Errorf("session is closing")
+	}
+	program := req.Type == ShellRequestType || req.Type == ExecRequestType || req.Type == "subsystem"
+	setup := req.Type == EnvRequestType || req.Type == PTYRequestType
+	if (program || setup) && s.phase != sessionConfiguring {
+		return fmt.Errorf("session program already admitted")
+	}
+	if program {
+		s.phase = sessionStarting
+	}
+	err := handler()
+	if program {
+		accepted := err == nil
+		if req.Replied() {
+			accepted = req.accepted
+		}
+		if accepted {
+			s.phase = sessionRunning
+		} else {
+			s.phase = sessionConfiguring
+		}
+	}
+	return err
 }
 
 func (s *Session) startTasks() {
