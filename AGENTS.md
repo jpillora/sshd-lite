@@ -56,6 +56,11 @@ go run . --tcp-forwarding user:pass   # Enable TCP forwarding
 | File | Purpose |
 |------|---------|
 | `main.go` | CLI entrypoint |
+| `client/dial.go`, `client/config_resolve.go`, `client/resolved.go` | Explicit client connection API and sealed configuration |
+| `client/config_reader.go`, `client/config_policy.go`, `client/config_paths.go` | Config parsing, supported policy and path expansion |
+| `client/source.go` | Bounded regular-file snapshots shared by config, identities and trust |
+| `client/auth.go`, `client/agent.go`, `client/identity.go` | Per-dial authentication, agent lifetime and key handling |
+| `client/trust*.go`, `client/connect_legacy.go` | Strict library trust versus legacy CLI policy and defaults |
 | `sshd/config.go` | Public high-level server configuration and handler types |
 | `sshd/server.go` | Listener lifecycle, context shutdown, and handshake admission |
 | `sshd/server_config.go` | Host-key, shell/workdir, and authentication setup |
@@ -65,6 +70,7 @@ go run . --tcp-forwarding user:pass   # Enable TCP forwarding
 | `xssh/config.go` | Lower-level SSH connection configuration and handler APIs |
 | `xssh/conn.go` | Protocol handler registration and connection serving |
 | `xssh/session_handler.go` | PTY, shell, environment, and exec request handling |
+| `xssh/session_dispatch.go` | Session request routing and replies under single-program admission |
 | `xssh/sftp.go` | SFTP subsystem implementation |
 | `xssh/tcp_fwd.go` | Local and reverse TCP forwarding |
 | `server/compat.go` | Deprecated compatibility aliases for older imports |

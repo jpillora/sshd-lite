@@ -12,6 +12,15 @@ import (
 // Start from fresh DialOptions to resolve a different target or policy.
 var ErrResolvedOptionsChanged = errors.New("ssh client: resolved configuration changed; use fresh DialOptions")
 
+type resolvedConfig struct {
+	inputs                    resolvedInputs
+	only, batch, hash         bool
+	strict, alias, writeTrust string
+	known                     []string
+	pubkey, password          bool
+	defaults                  bool
+}
+
 // resolvedInputs seals the configuration that produced the resolved policy.
 // Credentials and callbacks are per-attempt inputs, not compiled configuration.
 // This snapshot contains no passwords, passphrases or authentication callbacks.

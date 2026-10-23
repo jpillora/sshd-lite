@@ -5,150 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 	"io"
-	"net"
 	"sync"
-	"time"
+
+	"golang.org/x/crypto/ssh"
 )
-
-// authOwner keeps the agent alive through handshake signatures only.
-type authOwner struct {
-	conn net.Conn
-	stop func() bool
-	done chan struct{}
-}
-
-func (a *authOwner) close() {
-	if a.conn == nil {
-		return
-	}
-	if !a.stop() {
-		<-a.done
-	}
-	_ = a.conn.Close()
-}
-func (a *authOwner) agent(ctx context.Context, socket string) ([]ssh.Signer, error) {
-	if a.conn != nil {
-		return nil, errors.New("ssh client: repeated agent discovery")
-	}
-	if socket == "" {
-		return nil, nil
-	}
-	c, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "unix", socket)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, nil
-	}
-	a.conn = c
-	a.done = make(chan struct{})
-	a.stop = context.AfterFunc(ctx, func() { _ = c.Close(); close(a.done) })
-	if err := c.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		return nil, err
-	}
-	// Hide Closer so canonical RPCs own no reader goroutine.
-	rw := struct {
-		io.Reader
-		io.Writer
-	}{io.LimitReader(c, 1<<20), c}
-	signers, err := agent.NewClient(rw).Signers()
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if err != nil {
-		return nil, fmt.Errorf("ssh client: agent keys: %w", err)
-	}
-	if len(signers) > 256 {
-		return nil, errors.New("ssh client: agent identity limit")
-	}
-	return signers, nil
-}
-
-func prepareAuthentication(ctx context.Context, o DialOptions) ([]ssh.AuthMethod, func()) {
-	owner := &authOwner{}
-	if o.Auth != nil {
-		return append([]ssh.AuthMethod(nil), o.Auth...), owner.close
-	}
-	var methods []ssh.AuthMethod
-	if o.resolved.pubkey {
-		methods = append(methods, ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
-			agentKeys, err := owner.agent(ctx, o.Sources.AgentSocket)
-			if err != nil {
-				return nil, err
-			}
-			var files []ssh.Signer
-			for _, name := range o.IdentityFiles {
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				data, err := readSource(ctx, name, 1<<20)
-				if err != nil {
-					return nil, fmt.Errorf("ssh client: identity read: %w", err)
-				}
-				if data == nil {
-					data, err = readSource(ctx, name+".pub", 1<<20)
-					if err != nil {
-						return nil, err
-					}
-					if data == nil {
-						continue
-					}
-				}
-				if pub, _, _, _, err := ssh.ParseAuthorizedKey(data); err == nil {
-					files = append(files, &fileSigner{public: pub, path: name, ctx: ctx, options: o})
-					continue
-				}
-				signer, err := ssh.ParsePrivateKey(data)
-				if err == nil {
-					files = append(files, signer)
-					continue
-				}
-				var missing *ssh.PassphraseMissingError
-				if !errors.As(err, &missing) {
-					return nil, fmt.Errorf("ssh client: identity parse: %w", err)
-				}
-				pub := missing.PublicKey
-				if pub == nil {
-					raw, e := readSource(ctx, name+".pub", 1<<20)
-					if e != nil {
-						return nil, e
-					}
-					if raw != nil {
-						pub, _, _, _, err = ssh.ParseAuthorizedKey(raw)
-						if err != nil {
-							return nil, err
-						}
-					}
-				}
-				if pub == nil {
-					signer, err = decryptIdentity(ctx, o, name, data)
-					if err != nil {
-						return nil, err
-					}
-					files = append(files, signer)
-					continue
-				}
-				files = append(files, &fileSigner{public: pub, data: data, path: name, ctx: ctx, options: o})
-			}
-			return orderedSigners(agentKeys, files, o.resolved.only), nil
-		}))
-	}
-	if o.resolved.password {
-		if o.Password != "" {
-			methods = append(methods, ssh.Password(o.Password))
-		} else if o.passwordCallback != nil {
-			methods = append(methods, ssh.PasswordCallback(func() (string, error) {
-				var password string
-				err := o.interaction.run(ctx, func() error { var e error; password, e = o.passwordCallback(); return e })
-				return password, err
-			}))
-		}
-	}
-	return methods, owner.close
-}
 
 // OpenSSH offers matching agent references first, remaining agent keys unless
 // IdentitiesOnly, then unconsumed file identities in declaration order.
@@ -218,4 +79,33 @@ func (s *fileSigner) SignWithAlgorithm(random io.Reader, data []byte, algorithm 
 		return nil, errors.New("ssh client: unsupported signing algorithm")
 	}
 	return s.signer.Sign(random, data)
+}
+
+func decryptIdentity(ctx context.Context, o DialOptions, name string, data []byte) (ssh.Signer, error) {
+	if len(o.Passphrase) > 0 {
+		s, e := ssh.ParsePrivateKeyWithPassphrase(data, o.Passphrase)
+		if e == nil {
+			return s, nil
+		}
+	}
+	if o.resolved.batch || o.Interaction.Passphrase == nil {
+		return nil, fmt.Errorf("%w: encrypted identity", ErrInteractionRequired)
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		var phrase []byte
+		err := o.interaction.run(ctx, func() error { var e error; phrase, e = o.Interaction.Passphrase(ctx, name); return e })
+		if err != nil {
+			clear(phrase)
+			return nil, err
+		}
+		signer, e := ssh.ParsePrivateKeyWithPassphrase(data, phrase)
+		clear(phrase)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if e == nil {
+			return signer, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: private key passphrase attempts exhausted", ErrAuthentication)
 }

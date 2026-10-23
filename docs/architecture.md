@@ -121,6 +121,24 @@ The CI interoperability job targets `./mosh ./internal/mosh/...`.
 
 # Shared SSH client configuration
 
+The public `client` package stays one facade, with same-package responsibility
+boundaries rather than extra dependency layers:
+
+| Responsibility | Files |
+| --- | --- |
+| Configuration resolution and sealed policy | `config_resolve.go`, `resolved.go` |
+| Bounded config parsing, expansion and admission | `config_reader.go`, `config_lex.go`, `config_paths.go`, `config_policy.go` |
+| Shared regular-file snapshots | `source.go` and platform `source_*.go` |
+| Per-dial authentication, agent lifetime and identities | `auth.go`, `agent.go`, `identity.go` |
+| Strict library trust and guarded publication | `trust.go`, `trust_snapshot.go`, `trust_write.go` |
+| CLI defaults and legacy trust/persistence | `connect_legacy.go`, `trust_legacy.go`, `trust_legacy_write.go` |
+| Interaction and terminal prompt ownership | `interaction.go`, `prompt_*.go` |
+
+The shared source reader owns bounds and stable reads, not policy. Configuration,
+identity and trust owners decide how to handle missing sources. The two trust
+writers remain separate because CLI replacement/symlink behavior and Dial's
+unknown-key-only guarded persistence have different contracts.
+
 `client.Resolve` captures explicit config/environment authority and returns reusable
 options. Resolved configuration is sealed against a private copied snapshot;
 editing its endpoint, sources, identities, timeout or selected environment returns

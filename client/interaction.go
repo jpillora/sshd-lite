@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/ssh"
 	"net"
 	"strconv"
 	"time"
@@ -24,7 +23,6 @@ type Interaction struct {
 
 var ErrInteractionRequired = errors.New("ssh client: interactive confirmation is required")
 var ErrHostKeyRejected = errors.New("ssh client: host key rejected")
-var ErrAuthentication = errors.New("ssh client: authentication failed")
 
 type interactionOwner struct{ conn net.Conn }
 
@@ -43,34 +41,6 @@ func (i *interactionOwner) run(ctx context.Context, fn func() error) error {
 		return ctx.Err()
 	}
 	return err
-}
-func decryptIdentity(ctx context.Context, o DialOptions, name string, data []byte) (ssh.Signer, error) {
-	if len(o.Passphrase) > 0 {
-		s, e := ssh.ParsePrivateKeyWithPassphrase(data, o.Passphrase)
-		if e == nil {
-			return s, nil
-		}
-	}
-	if o.resolved.batch || o.Interaction.Passphrase == nil {
-		return nil, fmt.Errorf("%w: encrypted identity", ErrInteractionRequired)
-	}
-	for attempt := 0; attempt < 3; attempt++ {
-		var phrase []byte
-		err := o.interaction.run(ctx, func() error { var e error; phrase, e = o.Interaction.Passphrase(ctx, name); return e })
-		if err != nil {
-			clear(phrase)
-			return nil, err
-		}
-		signer, e := ssh.ParsePrivateKeyWithPassphrase(data, phrase)
-		clear(phrase)
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if e == nil {
-			return signer, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: private key passphrase attempts exhausted", ErrAuthentication)
 }
 
 // TerminalInteraction prompts through the controlling terminal, never command
