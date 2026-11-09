@@ -75,8 +75,8 @@ github.com/unixshells/mosh-go v0.5.2 h1:UqEAdkoJi+YRBP6Rq5lyuD9ifkYphwZfpaDCRX6H
 github.com/unixshells/mosh-go v0.5.2/go.mod h1:4/y1LRlSJZ5GFeunI+aXqpqc2cvPtIWRgfCfxnjgz0Q=
 github.com/unixshells/vt-go v0.2.0 h1:fKOHymso7q4mE/TTRPBZMWtM5kZFoHdPUsk1kkLtypA=
 github.com/unixshells/vt-go v0.2.0/go.mod h1:dZpOXxVyO7LG1uxkVMixX7HwUf2ZbUkEKhtHHJTTIBI=
-github.com/xo/terminfo v1.2.0 h1:d0ZTOCpuGE0lwSAOs0zcJjwz3jWQyqcRt9XbGJpCOl4=
-github.com/xo/terminfo v1.2.0/go.mod h1:lGzkSo8Fe7IRh/w+Gqz7n5mDog4FVXCj3gy/DYTBqio=
+github.com/xo/terminfo v1.3.1 h1:4ZwPCuu4PEFw0PkNp3Hv/x3gqvgLCzYhurszsj101cM=
+github.com/xo/terminfo v1.3.1/go.mod h1:lGzkSo8Fe7IRh/w+Gqz7n5mDog4FVXCj3gy/DYTBqio=
 golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
 golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
 golang.org/x/sync v0.24.0 h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA=
