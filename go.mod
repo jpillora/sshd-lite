@@ -30,7 +30,7 @@ require (
 	github.com/jpillora/md-tmpl v1.3.0 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/unixshells/vt-go v0.2.0 // indirect
-	github.com/xo/terminfo v1.2.0 // indirect
+	github.com/xo/terminfo v1.3.1 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 )
 
