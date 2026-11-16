@@ -13,8 +13,8 @@ require (
 	github.com/jpillora/sftp v1.13.15
 	github.com/muesli/cancelreader v0.2.2
 	github.com/unixshells/mosh-go v0.5.2
-	golang.org/x/crypto v0.58.0
-	golang.org/x/term v0.47.0
+	golang.org/x/crypto v0.59.0
+	golang.org/x/term v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
 	mvdan.cc/sh/v3 v3.14.1
 )
@@ -30,8 +30,8 @@ require (
 	github.com/jpillora/md-tmpl v1.3.0 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/unixshells/vt-go v0.2.0 // indirect
-	github.com/xo/terminfo v1.2.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
+	github.com/xo/terminfo v1.3.1 // indirect
+	golang.org/x/sync v0.25.0 // indirect
 )
 
 require (
@@ -45,5 +45,5 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/posener/complete v1.2.3 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 )
