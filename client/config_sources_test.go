@@ -87,3 +87,77 @@ func TestResolveDoesNotInheritProcess(t *testing.T) {
 		t.Fatal("inherited Unix system trust path on Windows")
 	}
 }
+
+func TestResolveStockSendEnv351(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		config      string
+		environment map[string]string
+		want        []EnvironmentEntry
+		unsupported string
+		invalid     bool
+	}{
+		{
+			name:        "absent",
+			environment: map[string]string{"LANG": "C", "LC_TIME": "C", "UNLISTED": "sentinel"},
+			want:        []EnvironmentEntry{{"LANG", "C"}, {"LC_TIME", "C"}},
+		},
+		{
+			name:        "present",
+			environment: map[string]string{"LANG": "C", "LC_TIME": "C", "COLORTERM": "truecolor", "NO_COLOR": "1", "UNLISTED": "sentinel"},
+			want:        []EnvironmentEntry{{"COLORTERM", "truecolor"}, {"LANG", "C"}, {"LC_TIME", "C"}, {"NO_COLOR", "1"}},
+		},
+		{
+			name:        "present empty",
+			environment: map[string]string{"COLORTERM": "", "NO_COLOR": ""},
+			want:        []EnvironmentEntry{{"COLORTERM", ""}, {"NO_COLOR", ""}},
+		},
+		{
+			name:        "minus patterns",
+			config:      "SendEnv -COLORTERM -NO_COLOR\n",
+			environment: map[string]string{"LANG": "C", "COLORTERM": "truecolor", "NO_COLOR": "1"},
+			want:        []EnvironmentEntry{{"LANG", "C"}},
+		},
+		{name: "unlisted directive operand", config: "SendEnv UNLISTED\n", unsupported: "SendEnv"},
+		{name: "wildcard operand", config: "SendEnv *\n", unsupported: "SendEnv"},
+		{name: "color wildcard", config: "SendEnv COLORTERM*\n", unsupported: "SendEnv"},
+		{name: "case sensitive", config: "SendEnv no_color\n", unsupported: "SendEnv"},
+		{name: "unknown directive", config: "UnknownOption351 yes\n", unsupported: "unknownoption351"},
+		{name: "control byte", environment: map[string]string{"NO_COLOR": "ignored\nline"}, invalid: true},
+		{name: "long value", environment: map[string]string{"COLORTERM": strings.Repeat("x", 4097)}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config")
+			config := "Host *\n SendEnv LANG LC_* COLORTERM NO_COLOR\n" + tc.config
+			if err := os.WriteFile(path, []byte(config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Resolve(context.Background(), DialOptions{
+				Host: "example.test",
+				User: "git",
+				Sources: Sources{
+					Directory:   dir,
+					ConfigFiles: []string{path},
+					Environment: tc.environment,
+				},
+			})
+			if tc.unsupported != "" {
+				var unsupported *UnsupportedError
+				if !errors.As(err, &unsupported) || unsupported.Directive != tc.unsupported {
+					t.Fatalf("wanted unsupported %s, got %v", tc.unsupported, err)
+				}
+				return
+			}
+			if tc.invalid {
+				if err == nil || err.Error() != "ssh client: invalid session environment" {
+					t.Fatalf("wanted bounded environment refusal, got %v", err)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got.SendEnvironment, tc.want) {
+				t.Fatalf("selected environment = %v, want %v, err = %v", got.SendEnvironment, tc.want, err)
+			}
+		})
+	}
+}

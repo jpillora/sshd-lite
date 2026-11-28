@@ -502,7 +502,7 @@ func (r *configReader) admit() error {
 	}
 	for _, p := range r.sendEnv {
 		p = strings.TrimPrefix(p, "-")
-		if p != "LANG" && p != "LC_*" && !strings.HasPrefix(p, "LC_") {
+		if p != "LANG" && p != "LC_*" && p != "COLORTERM" && p != "NO_COLOR" && !strings.HasPrefix(p, "LC_") {
 			return &UnsupportedError{"SendEnv"}
 		}
 	}
